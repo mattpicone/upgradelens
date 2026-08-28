@@ -6,3 +6,4 @@ dist/
 .DS_Store
 coverage/
 .admin_key_local
+.owner_token_local
