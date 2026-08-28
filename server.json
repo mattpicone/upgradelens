@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.mattpicone/upgradelens",
   "title": "UpgradeLens",
-  "description": "Dependency upgrade intelligence for coding agents: one deterministic, source-cited call answers whether and how an npm or PyPI package should move from version A to version B — security delta (OSV), runtime compatibility, dependency diff, EOL and documented breaking changes.",
+  "description": "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
   "version": "0.1.0",
   "websiteUrl": "https://upgradelens.mattpicone.workers.dev",
   "repository": {
