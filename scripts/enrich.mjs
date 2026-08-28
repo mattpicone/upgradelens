@@ -65,9 +65,9 @@ function extractBreaking(body) {
     }
     const isBullet = /^[-*+]\s+/.test(trimmed);
     if (inBreakingSection && isBullet) {
-      facts.push({ text: trimmed.replace(/^[-*+]\s+/, ""), confidence: 0.9 });
+      facts.push({ text: trimmed.replace(/^[-*+]\s+/, ""), confidence: 0.9, severity: "unknown" });
     } else if (BREAKING_INLINE.test(trimmed) && trimmed.length < 400) {
-      facts.push({ text: trimmed, confidence: 0.85 });
+      facts.push({ text: trimmed, confidence: 0.85, severity: "high" });
     }
     if (facts.length >= 10) break;
   }
@@ -100,7 +100,7 @@ async function gh(path) {
 
 const rows = [];
 for (const t of TARGETS) {
-  const releases = await gh(`/repos/${t.repo}/releases?per_page=15`);
+  const releases = await gh(`/repos/${t.repo}/releases?per_page=30`);
   if (!Array.isArray(releases)) {
     console.warn(`skip ${t.repo}: releases unavailable`);
     continue;
@@ -114,7 +114,7 @@ for (const t of TARGETS) {
         package: t.package,
         version,
         summary: fact.text,
-        severity: "high",
+        severity: fact.severity,
         source_url: rel.html_url,
         confidence: fact.confidence,
       });

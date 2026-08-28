@@ -11,11 +11,36 @@ export interface SourceResult<T> {
   error?: string;
 }
 
-const UA = "UpgradeLens/0.1 (+https://github.com/mattpicone/upgradelens)";
+const UA = "UpgradeLens/0.2 (+https://github.com/mattpicone/upgradelens)";
+const DEFAULT_MAX_RESPONSE_BYTES = 1536 * 1024;
+
+async function readBoundedJson<T>(res: Response, maxBytes: number): Promise<T> {
+  const declared = Number(res.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`upstream response exceeds ${maxBytes} bytes`);
+  }
+  if (!res.body) throw new Error("upstream response has no body");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel("upstream response too large");
+      throw new Error(`upstream response exceeds ${maxBytes} bytes`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  return JSON.parse(text) as T;
+}
 
 export async function fetchJson<T>(
   url: string,
-  init?: RequestInit & { timeoutMs?: number },
+  init?: RequestInit & { timeoutMs?: number; maxResponseBytes?: number },
 ): Promise<SourceResult<T>> {
   const fetched_at = new Date().toISOString();
   const controller = new AbortController();
@@ -40,7 +65,7 @@ export async function fetchJson<T>(
         error: `HTTP ${res.status}`,
       };
     }
-    const data = (await res.json()) as T;
+    const data = await readBoundedJson<T>(res, init?.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES);
     return { ok: true, data, status: res.status, url, fetched_at };
   } catch (e) {
     return {

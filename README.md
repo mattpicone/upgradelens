@@ -8,6 +8,7 @@ One deterministic, source-cited call answers: *should this dependency move from 
 - **Remote MCP endpoint:** `https://upgradelens.mattpicone.workers.dev/mcp` (streamable HTTP)
 - **REST API:** [`/openapi.json`](https://upgradelens.mattpicone.workers.dev/openapi.json) · [`/llms.txt`](https://upgradelens.mattpicone.workers.dev/llms.txt) · [`/pricing.json`](https://upgradelens.mattpicone.workers.dev/pricing.json)
 - **Decisions:** `proceed | review_required | block | unknown` — `unknown` is returned rather than fabricated certainty
+- **Action gate:** agents may edit dependency files only when `action_allowed` is `true`; target discovery always requires a follow-up check
 - **Sources:** [deps.dev](https://deps.dev), [OSV.dev](https://osv.dev), [registry.npmjs.org](https://registry.npmjs.org), [pypi.org](https://pypi.org), [endoflife.date](https://endoflife.date). Every semantic claim carries evidence with a source URL and fetch timestamp.
 - **Read-only:** the service never executes commands, never clones repos, never fetches caller-supplied URLs.
 - **Free evaluation quota**, no signup. Higher limits with an instant free key (`POST /v1/keys`).
@@ -17,7 +18,7 @@ One deterministic, source-cited call answers: *should this dependency move from 
 | Tool | Use when | Do not use when |
 |---|---|---|
 | `check_dependency_upgrade` | You are about to change a package from a known current version to a known target version and need verified compatibility/vulnerability/EOL/breaking-change evidence before editing dependency files | Merely installing a package or searching docs |
-| `find_safe_upgrade_target` | A dependency should be upgraded but the target version is not yet known — returns ranked candidates | The target version is already chosen |
+| `find_safe_upgrade_target` | A dependency should be upgraded but the target version is not yet known — returns ranked candidates that must each be checked | The target version is already chosen, or as authorization to edit dependency files |
 | `plan_dependency_upgrade` | A target is selected and you need ordered, source-cited migration actions | General tutorials |
 
 ## Setup
@@ -93,6 +94,7 @@ Response (abbreviated):
 ```json
 {
   "decision": "review_required",
+  "action_allowed": false,
   "risk_score": 37,
   "latest_stable": "5.2.1",
   "security_delta": {
@@ -103,6 +105,7 @@ Response (abbreviated):
     "dependency_changes": {"added": ["router"], "removed": ["depd"], "changed": []}
   },
   "reasons": ["Major version jump (4.19.2 -> 5.1.0).", "Upgrade fixes 1 known advisory: GHSA-qw6h-vgh9-j6wx."],
+  "coverage": {"registry": {"status": "complete"}, "osv": {"status": "complete"}},
   "evidence": [{"id": "ev_...", "source_type": "osv", "source_url": "https://osv.dev/vulnerability/GHSA-qw6h-vgh9-j6wx", "fetched_at": "..."}],
   "confidence": 0.95,
   "freshness": "..."

@@ -35,12 +35,13 @@ jobs:
             const title = `Health check failed (${new Date().toISOString().slice(0,16)} UTC)`;
             const open = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo,
-              state: "open", labels: "incident",
+              state: "open", per_page: 100,
             });
-            if (open.data.length === 0) {
+            const existing = open.data.some(issue => issue.title.startsWith("Health check failed"));
+            if (!existing) {
               await github.rest.issues.create({
                 owner: context.repo.owner, repo: context.repo.repo,
-                title, labels: ["incident"],
+                title,
                 body: `Automated probe of ${process.env.SERVICE_URL}/healthz failed with status ${{ steps.probe.outputs.status }}.\n\nRunbook:\n1. Check https://dash.cloudflare.com worker logs.\n2. \`npx wrangler tail upgradelens\`\n3. Roll back if a recent deploy caused it: \`npx wrangler rollback\``,
               });
             }

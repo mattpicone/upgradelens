@@ -16,14 +16,17 @@ describe("parseSemver", () => {
     expect(parseSemver("5.0.0-beta.1")).toMatchObject({ prerelease: ["beta", 1] });
     expect(parseSemver("1.0.0+build.5")).toMatchObject({ major: 1, prerelease: [] });
   });
-  it("tolerates loose versions", () => {
-    expect(parseSemver("2")).toMatchObject({ major: 2, minor: 0, patch: 0 });
-    expect(parseSemver("3.1")).toMatchObject({ major: 3, minor: 1, patch: 0 });
+  it("rejects partial package versions", () => {
+    expect(parseSemver("2")).toBeNull();
+    expect(parseSemver("3.1")).toBeNull();
   });
   it("rejects garbage", () => {
     expect(parseSemver("not-a-version")).toBeNull();
     expect(parseSemver("")).toBeNull();
     expect(parseSemver("1.2.3.4.5.x")).toBeNull();
+    expect(parseSemver("01.2.3")).toBeNull();
+    expect(parseSemver("1.2.3-01")).toBeNull();
+    expect(parseSemver("9007199254740992.0.0")).toBeNull();
   });
 });
 
@@ -60,6 +63,8 @@ describe("isPrerelease", () => {
 describe("satisfiesRange (engines.node style)", () => {
   it("handles >= ranges", () => {
     expect(satisfiesRange("20.11.0", ">=18")).toBe(true);
+    expect(satisfiesRange("18", ">=18")).toBe(true);
+    expect(satisfiesRange("18.19", ">=18")).toBe(true);
     expect(satisfiesRange("16.0.0", ">=18")).toBe(false);
   });
   it("handles OR ranges", () => {
@@ -72,6 +77,8 @@ describe("satisfiesRange (engines.node style)", () => {
     expect(satisfiesRange("5.0.0", "^4.2.0")).toBe(false);
     expect(satisfiesRange("1.2.9", "~1.2.3")).toBe(true);
     expect(satisfiesRange("1.3.0", "~1.2.3")).toBe(false);
+    expect(satisfiesRange("0.5.0", "^0")).toBe(true);
+    expect(satisfiesRange("0.0.5", "^0.0")).toBe(true);
   });
   it("handles wildcard and AND", () => {
     expect(satisfiesRange("9.9.9", "*")).toBe(true);
@@ -82,6 +89,14 @@ describe("satisfiesRange (engines.node style)", () => {
     expect(satisfiesRange("2.5.0", "2 - 3")).toBe(true);
     expect(satisfiesRange("18.7.1", "18")).toBe(true);
     expect(satisfiesRange("19.0.0", "18")).toBe(false);
+    expect(satisfiesRange("3.5.0", "2 - 3")).toBe(true);
+    expect(satisfiesRange("2.3.5", "1.2 - 2.3")).toBe(true);
+    expect(satisfiesRange("2.5.0", "<=2")).toBe(true);
+    expect(satisfiesRange("1.2.1", ">1.2")).toBe(false);
+  });
+  it("excludes prereleases unless the range opts in", () => {
+    expect(satisfiesRange("1.1.0-beta.1", ">=1.0.0")).toBe(false);
+    expect(satisfiesRange("1.1.0-beta.1", ">=1.1.0-beta.0")).toBe(true);
   });
   it("returns null for unparseable input", () => {
     expect(satisfiesRange("garbage", ">=18")).toBeNull();

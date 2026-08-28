@@ -1,6 +1,6 @@
 {
   "name": "upgradelens",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Evidence-backed dependency upgrade intelligence for AI coding agents. REST API + remote MCP server.",
   "type": "module",
@@ -11,13 +11,17 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 execute upgradelens --local --file=./migrations/0001_init.sql",
-    "db:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql"
+    "db:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql",
+    "db:harden:local": "wrangler d1 execute upgradelens --local --file=./migrations/0002_hardening.sql",
+    "db:harden:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0002_hardening.sql"
   },
   "dependencies": {
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260828.1",
+    "@types/semver": "^7.8.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.0.0"

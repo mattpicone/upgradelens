@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import type { Env } from "../types";
-import { PRICING } from "../billing";
+import { PRICING, paymentActivation } from "../billing";
 import type { AppVariables } from "../context";
 
 export const meta = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -43,6 +43,7 @@ function openapiSpec(env: Env) {
     type: "object",
     properties: {
       decision: { type: "string", enum: decisionEnum },
+      action_allowed: { type: "boolean" },
       risk_score: { type: "integer", minimum: 0, maximum: 100 },
       ecosystem: { type: "string" },
       package: { type: "string" },
@@ -55,7 +56,9 @@ function openapiSpec(env: Env) {
       compatibility: { type: "object" },
       breaking_changes: { type: "array", items: { type: "object" } },
       reasons: { type: "array", items: { type: "string" } },
+      claim_evidence: { type: "array", items: { type: "object" } },
       evidence: { type: "array", items: evidence },
+      coverage: { type: "object" },
       confidence: { type: "number" },
       freshness: { type: "string", format: "date-time" },
       analysis_version: { type: "string" },
@@ -103,9 +106,9 @@ function openapiSpec(env: Env) {
       },
       "/v1/upgrade/target": {
         post: {
-          operationId: "findSafeUpgradeTarget",
+          operationId: "findUpgradeCandidates",
           summary:
-            "Rank candidate target versions when the target is not yet known.",
+            "Rank candidate target versions when the target is not yet known; every candidate requires a full check before editing.",
           requestBody: {
             required: true,
             content: {
@@ -130,7 +133,7 @@ function openapiSpec(env: Env) {
       "/v1/upgrade/batch": {
         post: {
           operationId: "batchCheckUpgrades",
-          summary: "Check up to 8 version pairs in one request.",
+          summary: "Check up to 3 version pairs in one request; each pair consumes one daily analysis unit.",
           requestBody: {
             required: true,
             content: {
@@ -138,7 +141,7 @@ function openapiSpec(env: Env) {
                 schema: {
                   type: "object",
                   required: ["pairs"],
-                  properties: { pairs: { type: "array", maxItems: 8, items: checkRequest } },
+                  properties: { pairs: { type: "array", maxItems: 3, items: checkRequest } },
                 },
               },
             },
@@ -189,7 +192,8 @@ meta.get("/pricing.json", (c) =>
   c.json({
     service: "UpgradeLens",
     updated: "2026-08-28",
-    mode: c.env.PAYMENTS_ENABLED === "true" ? "paid_testing" : "free_validation",
+    mode: paymentActivation(c.env).requested ? "activation_blocked" : "free_validation",
+    payment_activation: paymentActivation(c.env),
     ...PRICING,
   }),
 );
@@ -227,22 +231,43 @@ Use this service when you are about to edit dependency files (package.json, requ
 meta.get("/healthz", async (c) => {
   let dbOk = false;
   let analysisFreshness: string | null = null;
+  let enrichmentFreshness: string | null = null;
   try {
-    const row = await c.env.DB.prepare(
-      `SELECT last_success_at FROM source_snapshots WHERE source='analysis'`,
-    ).first<{ last_success_at: string }>();
+    const [analysis, enrichment] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT last_success_at FROM source_snapshots WHERE source='analysis'`,
+      ).first<{ last_success_at: string }>(),
+      c.env.DB.prepare(
+        `SELECT last_success_at FROM source_snapshots WHERE source='github_enrichment'`,
+      ).first<{ last_success_at: string }>(),
+    ]);
     dbOk = true;
-    analysisFreshness = row?.last_success_at ?? null;
+    analysisFreshness = analysis?.last_success_at ?? null;
+    enrichmentFreshness = enrichment?.last_success_at ?? null;
   } catch {
     dbOk = false;
   }
+  const ageMs = (value: string | null) => value ? Date.now() - new Date(value).getTime() : null;
+  const analysisStale = analysisFreshness !== null && (ageMs(analysisFreshness) ?? 0) > 24 * 3600e3;
+  const enrichmentStale = enrichmentFreshness !== null && (ageMs(enrichmentFreshness) ?? 0) > 8 * 864e5;
+  const enrichmentMissingAfterUse = analysisFreshness !== null && enrichmentFreshness === null;
+  const degraded = !dbOk || analysisStale || enrichmentStale || enrichmentMissingAfterUse;
   return c.json({
-    status: dbOk ? "ok" : "degraded",
+    status: degraded ? "degraded" : "ok",
     service: "upgradelens",
     version: c.env.SERVICE_VERSION,
     analysis_version: c.env.ANALYSIS_VERSION,
     db: dbOk ? "ok" : "unavailable",
     last_analysis_at: analysisFreshness,
+    last_breaking_change_enrichment_at: enrichmentFreshness,
+    freshness: {
+      analysis: analysisStale ? "stale" : analysisFreshness ? "fresh" : "idle",
+      breaking_changes: enrichmentStale
+        ? "stale"
+        : enrichmentFreshness
+          ? "fresh"
+          : "not_run",
+    },
     time: new Date().toISOString(),
   });
 });

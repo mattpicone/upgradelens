@@ -3,7 +3,7 @@
   "name": "io.github.mattpicone/upgradelens",
   "title": "UpgradeLens",
   "description": "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "websiteUrl": "https://upgradelens.mattpicone.workers.dev",
   "repository": {
     "url": "https://github.com/mattpicone/upgradelens",

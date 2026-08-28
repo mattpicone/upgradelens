@@ -21,6 +21,7 @@ describe("parsePep440", () => {
   it("parses epochs and local versions", () => {
     expect(parsePep440("1!2.0")).toMatchObject({ epoch: 1 });
     expect(parsePep440("1.0+local.1")).toMatchObject({ release: [1, 0] });
+    expect(parsePep440("1.0-1")).toMatchObject({ post: 1 });
   });
   it("rejects garbage", () => {
     expect(parsePep440("not.a.version!")).toBeNull();
@@ -41,6 +42,11 @@ describe("compareVersionsPy", () => {
   });
   it("respects epochs", () => {
     expect(compareVersionsPy("1!1.0", "2.0")).toBeGreaterThan(0);
+    expect(compareVersionsPy("999999999999999999999.0", "999999999999999999998.0")).toBeGreaterThan(0);
+  });
+  it("orders local versions", () => {
+    expect(compareVersionsPy("1.0+abc", "1.0+abd")).toBeLessThan(0);
+    expect(compareVersionsPy("1.0+1", "1.0+abc")).toBeGreaterThan(0);
   });
 });
 
@@ -79,5 +85,14 @@ describe("satisfiesPySpec (requires_python style)", () => {
   });
   it("returns null when unevaluable", () => {
     expect(satisfiesPySpec("garbage", ">=3.9")).toBeNull();
+    expect(satisfiesPySpec("3.11", ">=3.8,garbage,<4")).toBeNull();
+  });
+  it("implements local, arbitrary, prerelease and exclusive comparisons", () => {
+    expect(satisfiesPySpec("1.0+abd", "==1.0+abc")).toBe(false);
+    expect(satisfiesPySpec("1.0+abd", "!=1.0+abc")).toBe(true);
+    expect(satisfiesPySpec("1.0", "===1.0.0")).toBe(false);
+    expect(satisfiesPySpec("1.1a1", ">=1.0")).toBe(false);
+    expect(satisfiesPySpec("1.0.post1", ">1.0")).toBe(false);
+    expect(satisfiesPySpec("1.0rc1", "<1.0")).toBe(false);
   });
 });

@@ -80,4 +80,4 @@ export function validateCheckRequest(body: unknown): UpgradeCheckRequest {
 }
 
 export const MAX_BODY_BYTES = 32 * 1024;
-export const MAX_BATCH_PAIRS = 8; // subrequest budget on Workers free plan
+export const MAX_BATCH_PAIRS = 3; // Bound concurrent JSON parsing/CPU as well as external subrequests.

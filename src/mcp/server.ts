@@ -14,6 +14,8 @@ import {
 } from "../validate";
 import { checkUpgrade, planUpgrade, findTarget } from "../service";
 import type { AppVariables } from "../context";
+import { readJsonBody } from "../http/body";
+import { checkRateLimit } from "../telemetry";
 
 const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST_PROTOCOL = "2025-06-18";
@@ -48,19 +50,77 @@ const CHECK_INPUT_SCHEMA = {
   },
 } as const;
 
+const COVERAGE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["registry", "osv", "deps_dev", "eol", "breaking_changes"],
+  properties: Object.fromEntries(
+    ["registry", "osv", "deps_dev", "eol", "breaking_changes"].map((name) => [
+      name,
+      {
+        type: "object",
+        required: ["status", "as_of"],
+        properties: {
+          status: {
+            type: "string",
+            enum: ["complete", "partial", "unavailable", "not_applicable", "not_covered"],
+          },
+          as_of: { type: ["string", "null"] },
+          detail: { type: "string" },
+        },
+      },
+    ]),
+  ),
+} as const;
+
+const CHECK_OUTPUT_SCHEMA = {
+  type: "object",
+  required: [
+    "decision", "action_allowed", "risk_score", "ecosystem", "package", "current_version",
+    "target_version", "reasons", "claim_evidence", "evidence", "coverage", "confidence",
+    "freshness", "analysis_version",
+  ],
+  properties: {
+    decision: { type: "string", enum: ["proceed", "review_required", "block", "unknown"] },
+    action_allowed: { type: "boolean" },
+    risk_score: { type: "integer", minimum: 0, maximum: 100 },
+    ecosystem: { type: "string", enum: ["npm", "pypi"] },
+    package: { type: "string" },
+    current_version: { type: "string" },
+    target_version: { type: "string" },
+    reasons: { type: "array", items: { type: "string" } },
+    claim_evidence: { type: "array", items: { type: "object" } },
+    evidence: { type: "array", items: { type: "object" } },
+    coverage: COVERAGE_SCHEMA,
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    freshness: { type: "string" },
+    analysis_version: { type: "string" },
+  },
+  additionalProperties: true,
+} as const;
+
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
 export const MCP_TOOLS = [
   {
     name: "check_dependency_upgrade",
     title: "Check a dependency upgrade (known target version)",
     description:
-      "Use when you are about to change a software package from a known current version to a known target version and need current, verified compatibility, vulnerability, EOL and breaking-change evidence before editing dependency files (package.json, requirements.txt, pyproject.toml, lockfiles). Returns a deterministic decision (proceed | review_required | block | unknown) with risk score, security delta from OSV, runtime compatibility, dependency changes and source-cited evidence. Supports npm and PyPI. Do not use this tool merely to install a package, to search general package documentation, or when you do not yet know the target version (use find_safe_upgrade_target instead).",
+      "Use when you are about to change a software package from a known current version to a known target version. Returns proceed | review_required | block | unknown, action_allowed, explicit per-source coverage, and source-cited security, compatibility, EOL and breaking-change evidence. Only edit dependency files when action_allowed is true. Supports npm and PyPI. Do not use merely to install a package, search documentation, or when the target is unknown (use find_safe_upgrade_target).",
     inputSchema: CHECK_INPUT_SCHEMA,
+    outputSchema: CHECK_OUTPUT_SCHEMA,
+    annotations: READ_ONLY_ANNOTATIONS,
   },
   {
     name: "find_safe_upgrade_target",
     title: "Find a safe upgrade target (target version unknown)",
     description:
-      "Use when a dependency should be upgraded but the target version is not yet known. Returns candidate versions ranked by security fixes, known-advisory status, semver distance and stability, each with rationale and evidence. Supports npm and PyPI. Do not use when the target version has already been chosen — use check_dependency_upgrade instead. Do not use for packages you are newly installing.",
+      "Use when a dependency should be upgraded but the target is unknown, and only to discover candidate versions. This is ranking, not authorization: every candidate has requires_full_check=true and must be passed to check_dependency_upgrade before editing dependency files. Returns unknown security status if OSV is unavailable. Supports npm and PyPI. Do not use when the target is already chosen or for newly installed packages.",
     inputSchema: {
       type: "object",
       required: ["ecosystem", "package", "current_version"],
@@ -76,13 +136,51 @@ export const MCP_TOOLS = [
         allow_prerelease: { type: "boolean", description: "Include prerelease candidates." },
       },
     },
+    outputSchema: {
+      type: "object",
+      required: ["ecosystem", "package", "current_version", "candidates", "coverage", "confidence", "freshness", "analysis_version"],
+      properties: {
+        ecosystem: { type: "string", enum: ["npm", "pypi"] },
+        package: { type: "string" },
+        current_version: { type: "string" },
+        candidates: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["version", "decision", "requires_full_check", "rationale"],
+            properties: {
+              version: { type: "string" },
+              decision: { type: "string", enum: ["review_required", "block", "unknown"] },
+              requires_full_check: { const: true },
+              rationale: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        coverage: { type: "object" },
+        confidence: { type: "number" },
+        freshness: { type: "string" },
+        analysis_version: { type: "string" },
+      },
+      additionalProperties: true,
+    },
+    annotations: READ_ONLY_ANNOTATIONS,
   },
   {
     name: "plan_dependency_upgrade",
     title: "Plan a dependency upgrade (migration actions)",
     description:
-      "Use after a target version has been selected, when you need concrete, source-cited migration actions and changelog locations to address before or while modifying repository code. Returns everything check_dependency_upgrade returns plus ordered migration_actions[] and changelog_urls[]. Supports npm and PyPI. Do not use for general tutorials or package usage documentation.",
+      "Use after a target version has been selected to obtain source-cited review or migration steps. Returns everything from check_dependency_upgrade plus migration_actions and changelog_urls. It never instructs dependency-file edits when action_allowed is false. Supports npm and PyPI. Do not use for general tutorials or package documentation.",
     inputSchema: CHECK_INPUT_SCHEMA,
+    outputSchema: {
+      ...CHECK_OUTPUT_SCHEMA,
+      required: [...CHECK_OUTPUT_SCHEMA.required, "migration_actions", "changelog_urls"],
+      properties: {
+        ...CHECK_OUTPUT_SCHEMA.properties,
+        migration_actions: { type: "array", items: { type: "object" } },
+        changelog_urls: { type: "array", items: { type: "string" } },
+      },
+    },
+    annotations: READ_ONLY_ANNOTATIONS,
   },
 ] as const;
 
@@ -174,7 +272,7 @@ async function handleMessage(
           version: env.SERVICE_VERSION,
         },
         instructions:
-          "UpgradeLens answers dependency upgrade questions for npm and PyPI packages with deterministic, source-cited evidence (deps.dev, OSV, registries, endoflife.date). Call check_dependency_upgrade before editing dependency files when both versions are known; find_safe_upgrade_target when the target version is unknown; plan_dependency_upgrade for migration steps after choosing a target. Results include decision, risk_score, evidence and freshness. 'unknown' means insufficient evidence — never fabricated.",
+          "UpgradeLens answers npm and PyPI upgrade questions with deterministic, source-cited evidence. Call check_dependency_upgrade before editing when both versions are known; use find_safe_upgrade_target only to discover candidates; use plan_dependency_upgrade for review steps. Edit dependency files only when action_allowed=true. unknown means required evidence or caller context is insufficient.",
       });
     }
     case "ping":
@@ -187,7 +285,7 @@ async function handleMessage(
       setTool(name);
       const { structured, isError } = await callTool(env, name, args);
       return rpcResult(id, {
-        content: [{ type: "text", text: JSON.stringify(structured, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(structured) }],
         structuredContent: structured,
         isError,
       });
@@ -205,35 +303,61 @@ async function handleMessage(
 export async function handleMcp(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
 ): Promise<Response> {
-  if (c.req.method === "GET" || c.req.method === "DELETE") {
+  if (c.req.method !== "POST") {
     // Stateless server: no server-initiated streams, no sessions to delete.
     return c.body(null, 405, { Allow: "POST" });
   }
-  let payload: unknown;
-  try {
-    payload = await c.req.json();
-  } catch {
-    return c.json(rpcError(null, -32700, "Parse error: body must be JSON."), 400);
+  const origin = c.req.header("origin");
+  if (origin) {
+    const configured = (c.env.ALLOWED_ORIGINS ?? c.env.PUBLIC_BASE_URL)
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!configured.includes(origin)) {
+      return c.json(rpcError(null, -32600, "Origin is not allowed."), 403);
+    }
+  }
+  const protocolHeader = c.req.header("mcp-protocol-version");
+  if (protocolHeader && !SUPPORTED_PROTOCOLS.includes(protocolHeader)) {
+    return c.json(rpcError(null, -32600, `Unsupported MCP-Protocol-Version: ${protocolHeader}`), 400);
   }
 
-  const messages = Array.isArray(payload) ? payload : [payload];
-  if (messages.length === 0 || messages.length > 10) {
-    return c.json(rpcError(null, -32600, "Invalid request batch."), 400);
-  }
+  const parsed = await readJsonBody(c.req.raw);
+  if (!parsed.ok) return c.json(rpcError(null, parsed.status === 413 ? -32600 : -32700, parsed.message), parsed.status);
+  const payload = parsed.data;
+  if (Array.isArray(payload)) return c.json(rpcError(null, -32600, "JSON-RPC batches are not accepted by Streamable HTTP."), 400);
 
   const setTool = (t: string) => c.set("mcpTool", t);
-  const responses: unknown[] = [];
-  for (const raw of messages) {
-    const msg = raw as JsonRpcRequest;
-    if (msg?.jsonrpc !== "2.0" || typeof msg.method !== "string") {
-      responses.push(rpcError(null, -32600, "Invalid JSON-RPC message."));
-      continue;
-    }
-    const res = await handleMessage(c.env, msg, setTool);
-    if (res !== null) responses.push(res);
+  const msg = payload as JsonRpcRequest;
+  if (msg?.jsonrpc !== "2.0" || typeof msg.method !== "string") {
+    return c.json(rpcError(null, -32600, "Invalid JSON-RPC message."), 400);
   }
-
-  if (responses.length === 0) return c.body(null, 202);
-  const body = Array.isArray(payload) && responses.length > 1 ? responses : responses[0];
-  return c.json(body as object);
+  if (msg.method === "tools/call") {
+    const name = typeof msg.params?.name === "string" ? msg.params.name : "";
+    c.set("mcpTool", name);
+    const daily = await checkRateLimit(c.env, c.get("caller"), { skipEdge: true });
+    c.header("x-ratelimit-remaining-day", String(daily.remaining_day));
+    if (!daily.allowed) {
+      return c.json(
+        rpcError(msg.id ?? null, -32000, "Daily analysis quota exceeded; retry later."),
+        429,
+      );
+    }
+  }
+  const response = await handleMessage(c.env, msg, setTool);
+  if (response === null) return c.body(null, 202);
+  const rpc = response as { result?: { isError?: boolean; structuredContent?: unknown } };
+  if (rpc.result?.isError !== undefined) {
+    c.set("mcpIsError", rpc.result.isError === true);
+    const structured = rpc.result.structuredContent as Record<string, unknown> | undefined;
+    if (structured) {
+      c.set("meta", {
+        ecosystem: typeof structured.ecosystem === "string" ? structured.ecosystem : undefined,
+        package: typeof structured.package === "string" ? structured.package : undefined,
+      });
+      c.set("cacheHit", structured.cache_hit === true);
+      c.set("unknownResult", structured.decision === "unknown");
+    }
+  }
+  return c.json(response as object);
 }

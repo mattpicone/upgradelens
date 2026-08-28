@@ -13,7 +13,7 @@ and exactly what remains.
 | Surface | Status | Notes |
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens with MCP topics for GitHub search discovery |
-| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published 2026-08-28 as `io.github.mattpicone/upgradelens` v0.1.0 (status: active). Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
+| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published as `io.github.mattpicone/upgradelens`; the v0.2.0 manifest adds agent-safe action gating, output schemas and read-only/idempotent annotations. Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
 | llms.txt + OpenAPI + pricing.json | DONE | Live at https://upgradelens.mattpicone.workers.dev (`/llms.txt`, `/openapi.json`, `/pricing.json`) |
 | PulseMCP | READY | Auto-indexes the official registry; no separate submission needed once registry entry exists. Manual add form: https://www.pulsemcp.com/submit if indexing lags |
 | Glama MCP directory | READY | Indexes official registry + GitHub topics (`mcp-server` topic set). Manual claim possible at https://glama.ai/mcp/servers after registry publish |
@@ -21,7 +21,7 @@ and exactly what remains.
 | Anthropic Connectors Directory | READY (human-gated) | Submission requires the account owner to accept terms. Draft below |
 | OpenAI Apps SDK directory | LATER | Requires app packaging beyond an MCP tool server; revisit after usage signal |
 | Cursor discovery | DONE (in docs) | README + landing page carry copy-paste `mcp.json`; Cursor auto-invokes enabled MCP tools |
-| x402 Bazaar / Agentic.Market | LATER | Only relevant once payments are activated (monetization trigger) |
+| x402 Bazaar / Agentic.Market | LATER | Only relevant after paid-intent gates are met and a verified payment implementation exists |
 | npm/PyPI thin client packages | LATER | Only if genuine usage suggests installation friction |
 
 ## Anthropic Connectors Directory — prepared draft
@@ -39,4 +39,4 @@ and exactly what remains.
 1. ~~Publish registry entry~~ DONE via `Publish to MCP Registry` workflow (2026-08-28).
 2. Verify PulseMCP/Glama picked up the registry entry within ~1 week; if not, use their manual submit forms.
 3. Add the MCP endpoint to the repo About link.
-4. Announce nothing manually — machine legibility over marketing.
+4. Run three $0 discovery experiments one at a time: registry listing copy, ecosystem-specific GitHub examples, then directory submissions. Accept an experiment only if attributed successful tool calls include at least 3 independent clients and at least 1 returning client; ignore handshakes, scans, keys and owner traffic.

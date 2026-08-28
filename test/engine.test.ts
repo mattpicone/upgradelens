@@ -300,7 +300,7 @@ describe("failure handling", () => {
     expect(r.confidence).toBeLessThanOrEqual(0.5);
   });
 
-  it("degrades confidence but still answers when OSV is down", async () => {
+  it("returns unknown when OSV is down even for a minor jump", async () => {
     vi.stubGlobal(
       "fetch",
       mockFetch(
@@ -324,8 +324,95 @@ describe("failure handling", () => {
       current_version: "4.19.2",
       target_version: "4.21.2",
     });
-    expect(r.decision).not.toBe("unknown"); // minor jump can still be assessed
+    expect(r.decision).toBe("unknown");
+    expect(r.action_allowed).toBe(false);
     expect(r.confidence).toBeLessThan(0.9);
     expect(r.reasons.join(" ")).toMatch(/OSV/);
+  });
+});
+
+describe("decision invariants", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("does not let an identical-version no-op override a yanked blocker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        "https://api.deps.dev/v3/systems/pypi/packages/demo": {
+          packageKey: { name: "demo" },
+          versions: [{ versionKey: { version: "1.0.0" }, isDefault: true }],
+        },
+        "https://pypi.org/pypi/demo/1.0.0/json": {
+          info: { version: "1.0.0", requires_dist: [] },
+          urls: [{ yanked: true }],
+        },
+        "https://api.osv.dev/v1/querybatch": osvEmpty,
+      }),
+    );
+    const r = await analyzeUpgrade({
+      ecosystem: "pypi",
+      package: "demo",
+      current_version: "1.0.0",
+      target_version: "1.0.0",
+    });
+    expect(r.decision).toBe("block");
+    expect(r.action_allowed).toBe(false);
+  });
+
+  it("treats pre-1.0 npm minor upgrades as review-required", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        "https://api.deps.dev/v3/systems/npm/packages/demo": {
+          packageKey: { name: "demo" },
+          versions: [
+            { versionKey: { version: "0.2.0" }, isDefault: false },
+            { versionKey: { version: "0.3.0" }, isDefault: true },
+          ],
+        },
+        "https://registry.npmjs.org/demo/0.2.0": { version: "0.2.0", dependencies: {} },
+        "https://registry.npmjs.org/demo/0.3.0": { version: "0.3.0", dependencies: {} },
+        "https://api.osv.dev/v1/querybatch": osvEmpty,
+      }),
+    );
+    const r = await analyzeUpgrade({
+      ecosystem: "npm",
+      package: "demo",
+      current_version: "0.2.0",
+      target_version: "0.3.0",
+    });
+    expect(r.decision).toBe("review_required");
+    expect(r.action_allowed).toBe(false);
+    expect(r.reasons.join(" ")).toMatch(/Pre-1\.0/);
+  });
+
+  it("does not treat a PyPI CalVer first-segment change as safe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        "https://api.deps.dev/v3/systems/pypi/packages/calver-demo": {
+          packageKey: { name: "calver-demo" },
+          versions: [
+            { versionKey: { version: "2024.12" }, isDefault: false },
+            { versionKey: { version: "2025.1" }, isDefault: true },
+          ],
+        },
+        "https://pypi.org/pypi/calver-demo/2024.12/json": {
+          info: { version: "2024.12", requires_dist: [] }, urls: [],
+        },
+        "https://pypi.org/pypi/calver-demo/2025.1/json": {
+          info: { version: "2025.1", requires_dist: [] }, urls: [],
+        },
+        "https://api.osv.dev/v1/querybatch": osvEmpty,
+      }),
+    );
+    const r = await analyzeUpgrade({
+      ecosystem: "pypi",
+      package: "calver-demo",
+      current_version: "2024.12",
+      target_version: "2025.1",
+    });
+    expect(r.decision).toBe("review_required");
+    expect(r.reasons.join(" ")).toMatch(/compatibility cannot be inferred/);
   });
 });

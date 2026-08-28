@@ -33,6 +33,15 @@ export async function fetchPackageVersions(
   const url = `https://api.deps.dev/v3/systems/${sys}/packages/${encodeURIComponent(pkg)}`;
   const res = await fetchJson<DepsDevPackageResponse>(url, { timeoutMs: 8000 });
   if (!res.ok || !res.data) return { ...res, data: null };
+  if ((res.data.versions?.length ?? 0) > 5000) {
+    return {
+      ...res,
+      ok: false,
+      data: null,
+      status: 422,
+      error: "Version listing exceeds the supported 5000-entry analysis bound.",
+    };
+  }
   const versions = (res.data.versions ?? []).map((v) => ({
     version: v.versionKey?.version ?? "",
     published_at: v.publishedAt ?? null,

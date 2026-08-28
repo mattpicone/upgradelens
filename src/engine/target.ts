@@ -2,6 +2,8 @@
 
 import type { Ecosystem, Evidence, FindTargetResult, TargetCandidate } from "../types";
 import { cmpVersions, isPre, jumpOf, evidenceId } from "./analyze";
+import { parseSemver } from "./semver";
+import { parsePep440 } from "./pep440";
 import { fetchPackageVersions } from "../sources/depsdev";
 import { fetchJson } from "../sources/fetch";
 
@@ -26,6 +28,10 @@ export async function findSafeTarget(
     latest_stable: null,
     candidates: [],
     evidence,
+    coverage: {
+      deps_dev: { status: "unavailable", as_of: null },
+      osv: { status: "unavailable", as_of: null },
+    },
     confidence: 0.9,
     freshness: now,
     analysis_version: "",
@@ -36,6 +42,7 @@ export async function findSafeTarget(
     base.confidence = 0.3;
     return base;
   }
+  base.coverage.deps_dev = { status: "complete", as_of: listing.fetched_at };
   evidence.push({
     id: evidenceId("deps_dev", listing.data.source_url, "versions"),
     source_type: "deps_dev",
@@ -70,12 +77,32 @@ export async function findSafeTarget(
 
   // Candidate selection: newest patch in current major.minor, newest in current
   // major, newest of each higher major (bounded), newest overall.
-  const majorOf = (v: string) => v.replace(/^v/, "").split(".")[0] ?? "";
-  const minorKey = (v: string) => {
-    const p = v.replace(/^v/, "").split(".");
-    return `${p[0] ?? ""}.${p[1] ?? ""}`;
+  const segments = (v: string): { epoch: bigint; major: bigint; minor: bigint } | null => {
+    if (ecosystem === "npm") {
+      const parsed = parseSemver(v);
+      return parsed
+        ? { epoch: 0n, major: BigInt(parsed.major), minor: BigInt(parsed.minor) }
+        : null;
+    }
+    const parsed = parsePep440(v);
+    return parsed
+      ? {
+          epoch: BigInt(parsed.epochRaw),
+          major: BigInt(parsed.releaseRaw[0] ?? "0"),
+          minor: BigInt(parsed.releaseRaw[1] ?? "0"),
+        }
+      : null;
   };
-  const curMajor = majorOf(currentVersion);
+  const majorKey = (v: string) => {
+    const part = segments(v);
+    return part ? `${part.epoch}!${part.major}` : "invalid";
+  };
+  const minorKey = (v: string) => {
+    const part = segments(v);
+    return part ? `${part.epoch}!${part.major}.${part.minor}` : "invalid";
+  };
+  const currentSegments = segments(currentVersion);
+  const curMajor = majorKey(currentVersion);
   const curMinorKey = minorKey(currentVersion);
   const picked = new Map<string, { version: string; published_at: string | null }>();
 
@@ -84,19 +111,32 @@ export async function findSafeTarget(
 
   const samePatch = newestWhere((v) => minorKey(v) === curMinorKey);
   if (samePatch) picked.set(samePatch.version, samePatch);
-  const sameMajor = newestWhere((v) => majorOf(v) === curMajor);
+  const sameMajor = newestWhere((v) => majorKey(v) === curMajor);
   if (sameMajor) picked.set(sameMajor.version, sameMajor);
-  const majors = [...new Set(newer.map((v) => majorOf(v.version)))]
+  const majors = [...new Set(newer.map((v) => majorKey(v.version)))]
     .filter((m) => m !== curMajor)
     .slice(0, 3);
   const maxMajorJump = opts.maxMajorJump ?? Infinity;
+  const withinMajorCap = (version: string): boolean => {
+    const candidateSegments = segments(version);
+    if (!candidateSegments || !currentSegments) return false;
+    const distance = candidateSegments.major - currentSegments.major;
+    return !Number.isFinite(maxMajorJump) || (
+      candidateSegments.epoch === currentSegments.epoch &&
+      distance >= 0n &&
+      distance <= BigInt(maxMajorJump)
+    );
+  };
   for (const m of majors) {
-    if (Number(m) - Number(curMajor) > maxMajorJump) continue;
-    const newest = newestWhere((v) => majorOf(v) === m);
+    const candidate = newer.find((v) => majorKey(v.version) === m);
+    if (!candidate || !withinMajorCap(candidate.version)) continue;
+    const newest = newestWhere((v) => majorKey(v) === m);
     if (newest) picked.set(newest.version, newest);
   }
   const newestOverall = newer[0];
-  if (newestOverall && picked.size < 5) picked.set(newestOverall.version, newestOverall);
+  if (newestOverall && withinMajorCap(newestOverall.version) && picked.size < 5) {
+    picked.set(newestOverall.version, newestOverall);
+  }
 
   const candidates = [...picked.values()].slice(0, 5);
 
@@ -117,6 +157,7 @@ export async function findSafeTarget(
 
   let vulnsByVersion: Map<string, string[]> = new Map();
   if (osvRes.ok && osvRes.data) {
+    base.coverage.osv = { status: "complete", as_of: osvRes.fetched_at };
     versionsToQuery.forEach((v, i) => {
       vulnsByVersion.set(v, (osvRes.data!.results[i]?.vulns ?? []).map((x) => x.id));
     });
@@ -130,6 +171,7 @@ export async function findSafeTarget(
     });
   } else {
     base.confidence = 0.6;
+    base.coverage.osv = { status: "unavailable", as_of: osvRes.fetched_at };
   }
 
   const currentVulns = new Set(vulnsByVersion.get(currentVersion) ?? []);
@@ -139,7 +181,10 @@ export async function findSafeTarget(
     const fixes = [...currentVulns].filter((id) => !vulns.has(id));
     const introduces = [...vulns].filter((id) => !currentVulns.has(id));
     const jump = jumpOf(ecosystem, currentVersion, c.version);
-    const majorDistance = Math.max(0, Number(majorOf(c.version)) - Number(curMajor)) || 0;
+    const candidateSegments = segments(c.version);
+    const majorDistance = currentSegments && candidateSegments && currentSegments.epoch === candidateSegments.epoch
+      ? Number(candidateSegments.major - currentSegments.major)
+      : 10;
 
     let score = 60;
     score += Math.min(fixes.length * 15, 30);
@@ -148,22 +193,24 @@ export async function findSafeTarget(
     if (jump === "patch") score += 15;
     else if (jump === "minor") score += 8;
     if (isPre(ecosystem, c.version)) score -= 25;
-    if (vulns.size === 0) score += 10;
+    if (osvRes.ok && vulns.size === 0) score += 10;
     score = Math.max(0, Math.min(100, score));
 
     const rationale: string[] = [];
     if (fixes.length) rationale.push(`fixes ${fixes.length} advisories (${fixes.join(", ")})`);
     if (introduces.length)
       rationale.push(`introduces ${introduces.length} advisories (${introduces.join(", ")})`);
-    if (vulns.size === 0) rationale.push("no known advisories affect this version");
+    if (osvRes.ok && vulns.size === 0) rationale.push("OSV reports no advisories affecting this version");
+    if (!osvRes.ok) rationale.push("OSV was unavailable; security status is unknown");
     rationale.push(`${jump} jump from ${currentVersion}`);
+    rationale.push("candidate requires check_dependency_upgrade before any dependency edit");
 
     const decision: TargetCandidate["decision"] =
-      introduces.length > 0
+      !osvRes.ok
+        ? "unknown"
+        : introduces.length > 0
         ? "block"
-        : jump === "major"
-          ? "review_required"
-          : "proceed";
+        : "review_required";
 
     return {
       version: c.version,
@@ -174,6 +221,7 @@ export async function findSafeTarget(
       introduces_advisories: introduces,
       semver_jump: jump,
       published_at: c.published_at,
+      requires_full_check: true,
     };
   });
 

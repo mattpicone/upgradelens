@@ -7,7 +7,7 @@ export function fakeD1(): D1Database {
     bind: (..._args: unknown[]) => stmt,
     first: async () => null,
     all: async () => ({ results: [], success: true, meta: {} }),
-    run: async () => ({ results: [], success: true, meta: {} }),
+    run: async () => ({ results: [{ count: 1 }], success: true, meta: {} }),
     raw: async () => [],
   };
   return {
@@ -22,8 +22,8 @@ export function fakeD1(): D1Database {
 export function fakeEnv(overrides: Partial<Env> = {}): Env {
   return {
     DB: fakeD1(),
-    ANALYSIS_VERSION: "1",
-    SERVICE_VERSION: "0.1.0-test",
+    ANALYSIS_VERSION: "2",
+    SERVICE_VERSION: "0.2.0-test",
     PAYMENTS_ENABLED: "false",
     PUBLIC_BASE_URL: "https://upgradelens.test",
     OWNER_TOKEN: "test-owner-token",

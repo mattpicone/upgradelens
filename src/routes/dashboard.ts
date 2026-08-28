@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
 import type { AppVariables } from "../context";
+import { paymentActivation } from "../billing";
 
 export const dashboard = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -14,7 +15,14 @@ const THRESHOLDS = {
   minimum: { calls: 25, clients: 3, repeat: 1 },
   promising: { calls30d: 100, clients: 10, active3days: 3 },
   strong: { calls30d: 1000, repeat: 20, errorRate: 0.02 },
-  monetize: { calls30d: 500, repeat: 10 },
+  paidPilot: {
+    calls30d: 1000,
+    clients: 10,
+    active3days: 5,
+    repeat: 5,
+    errorRate: 0.01,
+    unknownRate: 0.05,
+  },
 };
 
 interface Stats {
@@ -189,16 +197,32 @@ async function collectStats(env: Env): Promise<Stats> {
   };
 }
 
-function businessState(s: Stats, paymentsEnabled: boolean): { state: string; why: string } {
+function businessState(
+  s: Stats,
+  activation: ReturnType<typeof paymentActivation>,
+): { state: string; why: string } {
   const daysLive = s.total.firstTs
     ? Math.floor((Date.now() - new Date(s.total.firstTs).getTime()) / 864e5)
     : 0;
   const errRate = s.d30.calls > 0 ? s.d30.errors / s.d30.calls : 0;
 
-  if (paymentsEnabled) {
+  if (activation.requested && !activation.ready) {
     return {
-      state: "MONETIZATION TESTING",
-      why: `Payments flag is enabled. Revenue to date: $${s.revenue.toFixed(2)}.`,
+      state: "PAYMENT ACTIVATION BLOCKED",
+      why: activation.blockers.join("; "),
+    };
+  }
+  if (
+    s.d30.success >= THRESHOLDS.paidPilot.calls30d &&
+    s.d30.unique >= THRESHOLDS.paidPilot.clients &&
+    s.d30.active3days >= THRESHOLDS.paidPilot.active3days &&
+    s.d30.repeat >= THRESHOLDS.paidPilot.repeat &&
+    errRate < THRESHOLDS.paidPilot.errorRate &&
+    s.unknownRate < THRESHOLDS.paidPilot.unknownRate
+  ) {
+    return {
+      state: "PAID PILOT ELIGIBLE",
+      why: "Reliability and retained-use gates are met. Require at least two explicit willing pilot clients before implementing or enabling payments.",
     };
   }
   if (
@@ -253,8 +277,8 @@ dashboard.get("/", async (c) => {
   }
 
   const s = await collectStats(c.env);
-  const paymentsOn = c.env.PAYMENTS_ENABLED === "true";
-  const { state, why } = businessState(s, paymentsOn);
+  const activation = paymentActivation(c.env);
+  const { state, why } = businessState(s, activation);
   const errRateToday = s.today.calls > 0 ? ((s.today.errors / s.today.calls) * 100).toFixed(1) : "0.0";
 
   const spark = (() => {
@@ -303,7 +327,7 @@ table{border-collapse:collapse;width:100%;max-width:640px}td,th{text-align:left;
 <h1>UpgradeLens — owner dashboard</h1>
 <p><span class="state">${state}</span></p>
 <p class="muted">${why}</p>
-<p class="muted">Out-of-pocket spend: <b class="ok">$0.00</b> (hard constraint) · Revenue: $${s.revenue.toFixed(2)} · Payment fees: $${s.fees.toFixed(2)} · Profit: $${(s.revenue - s.fees).toFixed(2)} · Mode: ${paymentsOn ? "PAID TESTING" : "FREE VALIDATION"}</p>
+<p class="muted">Out-of-pocket spend: <b class="ok">$0.00</b> (hard constraint) · Revenue: $${s.revenue.toFixed(2)} · Payment fees: $${s.fees.toFixed(2)} · Profit: $${(s.revenue - s.fees).toFixed(2)} · Mode: ${activation.requested ? "PAYMENT ACTIVATION BLOCKED" : "FREE VALIDATION"}</p>
 
 <h2>Today (UTC) — external only</h2>
 <div class="grid">
@@ -339,9 +363,8 @@ ${spark}
 <table><tr><th>Package</th><th>calls</th></tr>${rows(s.topPackages as never, ["package", "calls"])}</table>
 
 <h2>Thresholds (encoded)</h2>
-<p class="muted">Minimum continuation (45d): ≥25 successful external calls, ≥3 unique clients, ≥1 repeat client.
-Promising: ≥100 calls/30d, ≥10 clients, ≥3 active on 3+ days. Strong: ≥1,000 calls/30d, ≥20 repeat, &lt;2% errors.
-Monetization trigger: ≥500 calls/30d AND ≥10 repeat clients. Kill: below minimum after 45 days.</p>
+<p class="muted">Only completed REST/MCP analysis calls count; protocol handshakes and tool errors do not.
+Paid-pilot eligibility: ≥1,000 successful calls/30d, ≥10 clients, ≥5 active on 3+ days, ≥5 repeat clients, &lt;1% errors, &lt;5% unknowns, plus two explicit willing pilots. Payments remain technically blocked until the payment path is implemented and tested.</p>
 
 <h2>System</h2>
 <p class="muted">Version ${c.env.SERVICE_VERSION} · analysis v${c.env.ANALYSIS_VERSION} · generated ${new Date().toISOString()}</p>

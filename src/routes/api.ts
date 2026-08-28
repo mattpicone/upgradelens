@@ -17,6 +17,8 @@ import { queryOsv } from "../sources/osv";
 import { cycleStatus, eolProductFor, fetchEol } from "../sources/endoflife";
 import { cmpVersions, isPre } from "../engine/analyze";
 import type { AppVariables } from "../context";
+import { readJsonBody } from "../http/body";
+import { checkKeyIssuance, checkRateLimit } from "../telemetry";
 
 export const api = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -35,12 +37,9 @@ function handleValidation(e: unknown): Response {
 }
 
 api.post("/upgrade/check", async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return errJson(400, "invalid_json", "Request body must be valid JSON.");
-  }
+  const parsed = await readJsonBody(c.req.raw);
+  if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
+  const body = parsed.data;
   try {
     const req = validateCheckRequest(body);
     c.set("meta", { ecosystem: req.ecosystem, package: req.package });
@@ -54,12 +53,9 @@ api.post("/upgrade/check", async (c) => {
 });
 
 api.post("/upgrade/plan", async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return errJson(400, "invalid_json", "Request body must be valid JSON.");
-  }
+  const parsed = await readJsonBody(c.req.raw);
+  if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
+  const body = parsed.data;
   try {
     const req = validateCheckRequest(body);
     c.set("meta", { ecosystem: req.ecosystem, package: req.package });
@@ -73,12 +69,9 @@ api.post("/upgrade/plan", async (c) => {
 });
 
 api.post("/upgrade/batch", async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return errJson(400, "invalid_json", "Request body must be valid JSON.");
-  }
+  const parsed = await readJsonBody(c.req.raw);
+  if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
+  const body = parsed.data;
   const pairs = (body as { pairs?: unknown[] })?.pairs;
   if (!Array.isArray(pairs) || pairs.length === 0) {
     return errJson(400, "invalid_request", "Body must contain a non-empty 'pairs' array.");
@@ -92,6 +85,19 @@ api.post("/upgrade/batch", async (c) => {
   }
   try {
     const reqs = pairs.map((p) => validateCheckRequest(p));
+    if (reqs.length > 1) {
+      // The middleware already charges one analysis unit for the request. A
+      // batch must consume the remaining units too, otherwise it multiplies
+      // upstream and D1 work without consuming the corresponding daily quota.
+      const extra = await checkRateLimit(c.env, c.get("caller"), {
+        skipEdge: true,
+        units: reqs.length - 1,
+      });
+      c.header("x-ratelimit-remaining-day", String(extra.remaining_day));
+      if (!extra.allowed) {
+        return errJson(429, "rate_limited", "Daily analysis quota exceeded; retry later.");
+      }
+    }
     const results = await Promise.all(reqs.map((r) => checkUpgrade(c.env, r)));
     const summary = {
       total: results.length,
@@ -109,12 +115,9 @@ api.post("/upgrade/batch", async (c) => {
 });
 
 api.post("/upgrade/target", async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return errJson(400, "invalid_json", "Request body must be valid JSON.");
-  }
+  const parsed = await readJsonBody(c.req.raw);
+  if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
+  const body = parsed.data;
   try {
     const b = body as Record<string, unknown>;
     const eco = validateEcosystem(b.ecosystem);
@@ -203,11 +206,19 @@ api.get("/evidence/:id", async (c) => {
 
 api.post("/keys", async (c) => {
   let label: string | null = null;
-  try {
-    const body = (await c.req.json()) as { label?: string };
-    label = typeof body.label === "string" ? body.label : null;
-  } catch {
-    /* body optional */
+  if (c.req.raw.body) {
+    const parsed = await readJsonBody(c.req.raw);
+    if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
+    const body = parsed.data as { label?: string };
+    label = typeof body?.label === "string" ? body.label : null;
+  }
+  const issuance = await checkKeyIssuance(c.env, c.get("caller"));
+  if (!issuance.allowed) {
+    return errJson(
+      429,
+      "key_issuance_limited",
+      "Free key issuance is limited to two keys per anonymous client per day; keyed clients cannot mint additional keys.",
+    );
   }
   const created = await createApiKey(c.env, label);
   return c.json(

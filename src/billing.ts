@@ -1,10 +1,9 @@
-// Monetization scaffolding. Everything here is PREPARED but INACTIVE:
-// PAYMENTS_ENABLED=false means all calls are free within rate limits.
-// Activation requires no code changes, only config — and only after the
-// external-demand thresholds encoded in dashboard.ts are met.
+// Monetization scaffolding. Payments remain deliberately unavailable until a
+// verifier/settler, destination, replay protection, and entitlement lifecycle
+// are implemented and tested. A config flag alone can never activate charging.
 
 import type { Env } from "./types";
-import { hashIdentity } from "./telemetry";
+import { hashApiKey } from "./telemetry";
 
 export const PRICING = {
   currency: "USD",
@@ -17,41 +16,29 @@ export const PRICING = {
     enriched_check_per_call: 0.02,
     starter_monthly: { price: 19, enriched_calls: 2000 },
     builder_monthly: { price: 49, enriched_calls: 10000 },
-    status: "prepared_not_active",
+    status: "blocked_pending_payment_implementation",
     rails_planned: ["x402", "prepaid_credits"],
   },
 } as const;
 
 export function paymentsEnabled(env: Env): boolean {
-  return env.PAYMENTS_ENABLED === "true";
+  return paymentActivation(env).ready;
 }
 
-// x402-style 402 challenge (stub — served only when payments are enabled AND
-// the caller has no entitlement). Schema kept minimal and versioned so it can
-// be finalized against the live x402 spec at activation time.
-export function paymentRequiredResponse(env: Env, resource: string): Response {
-  return new Response(
-    JSON.stringify({
-      x402Version: 1,
-      error: "Payment required for this call volume.",
-      accepts: [
-        {
-          scheme: "exact",
-          network: "base",
-          maxAmountRequired: "20000", // $0.02 in USDC 6-decimals
-          resource: `${env.PUBLIC_BASE_URL}${resource}`,
-          description: "UpgradeLens enriched dependency upgrade analysis",
-          mimeType: "application/json",
-          payTo: "UNSET — configured at activation",
-          maxTimeoutSeconds: 60,
-          asset: "USDC",
-        },
-      ],
-      free_alternative:
-        "A free evaluation quota remains available. Create a key via POST /v1/keys.",
-    }),
-    { status: 402, headers: { "content-type": "application/json" } },
-  );
+export function paymentActivation(env: Env): {
+  requested: boolean;
+  ready: false;
+  blockers: string[];
+} {
+  return {
+    requested: env.PAYMENTS_ENABLED === "true",
+    ready: false,
+    blockers: [
+      ...(env.X402_PAY_TO ? [] : ["X402_PAY_TO is not configured"]),
+      "x402 v2 payment verification and settlement are not implemented",
+      "replay protection and paid entitlement lifecycle are not implemented",
+    ],
+  };
 }
 
 export async function createApiKey(
@@ -63,7 +50,7 @@ export async function createApiKey(
   const key =
     "ul_" +
     [...bytes].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
-  const keyHash = await hashIdentity(key);
+  const keyHash = await hashApiKey(key);
   await env.DB.prepare(
     `INSERT INTO api_clients (key_hash, label, plan, internal, daily_quota, created_at)
      VALUES (?,?,?,0,500,?)`,

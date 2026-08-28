@@ -8,4 +8,5 @@ export interface AppVariables {
   cacheHit?: boolean;
   unknownResult?: boolean;
   mcpTool?: string;
+  mcpIsError?: boolean;
 }

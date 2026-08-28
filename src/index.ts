@@ -15,10 +15,17 @@ import {
   checkRateLimit,
   recordUsage,
   cleanupRateCounters,
+  cleanupUsageEvents,
 } from "./telemetry";
 import { checkUpgrade } from "./service";
 
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+const TRACKED_REST_PATHS = new Set([
+  "/v1/upgrade/check",
+  "/v1/upgrade/plan",
+  "/v1/upgrade/target",
+  "/v1/upgrade/batch",
+]);
 
 // ---- global middleware: identity, rate limit, telemetry --------------------
 app.use("*", async (c, next) => {
@@ -30,6 +37,7 @@ app.use("*", async (c, next) => {
 
   const path = new URL(c.req.url).pathname;
   const metered = path.startsWith("/v1/") || path === "/mcp";
+  const dailyMetered = TRACKED_REST_PATHS.has(path) || path.startsWith("/v1/package/");
 
   const caller = await identifyCaller(c.env, c.req.raw);
   c.set("caller", caller);
@@ -40,7 +48,9 @@ app.use("*", async (c, next) => {
     if (len > 32 * 1024) {
       return c.json({ error: { code: "payload_too_large", message: "Body exceeds 32KB." } }, 413);
     }
-    const rate = await checkRateLimit(c.env, caller);
+    // Protocol, key issuance and evidence lookup get burst protection without
+    // consuming the global analysis fuse. Actual upstream work is daily-metered.
+    const rate = await checkRateLimit(c.env, caller, { daily: dailyMetered });
     c.header("x-ratelimit-remaining-day", String(rate.remaining_day));
     if (!rate.allowed) {
       const res = c.json(
@@ -54,7 +64,7 @@ app.use("*", async (c, next) => {
         },
         429,
       );
-      recordUsage(c.env, c.executionCtx, {
+      if (TRACKED_REST_PATHS.has(path)) recordUsage(c.env, c.executionCtx, {
         request_id: requestId,
         external: !caller.internal,
         client_key: caller.clientKey,
@@ -77,7 +87,8 @@ app.use("*", async (c, next) => {
 
   if (metered) {
     const mcpTool = c.get("mcpTool");
-    recordUsage(c.env, c.executionCtx, {
+    const track = TRACKED_REST_PATHS.has(path) || (path === "/mcp" && Boolean(mcpTool));
+    if (track) recordUsage(c.env, c.executionCtx, {
       request_id: requestId,
       external: !caller.internal,
       client_key: caller.clientKey,
@@ -86,7 +97,7 @@ app.use("*", async (c, next) => {
       ecosystem: c.get("meta")?.ecosystem,
       package: c.get("meta")?.package,
       cache_hit: c.get("cacheHit") === true,
-      status: c.res.status,
+      status: c.get("mcpIsError") ? 422 : c.res.status,
       latency_ms: Date.now() - started,
       unknown_result: c.get("unknownResult") === true,
       price_usd: 0,
@@ -129,22 +140,30 @@ async function scheduled(_event: ScheduledController, env: Env, ctx: ExecutionCo
   ctx.waitUntil(
     (async () => {
       await cleanupRateCounters(env);
-      // Refresh the most-demanded stale pairs (demand-weighted freshness).
+      await cleanupUsageEvents(env);
+      // Refresh the oldest stale pairs. Runtime context is reconstructed so a
+      // runtime-specific cache entry is refreshed under the same cache key.
       try {
         const rows = await env.DB.prepare(
-          `SELECT ecosystem, package, from_version, to_version
+          `SELECT ecosystem, package, from_version, to_version, runtime_key
            FROM upgrade_pairs
            WHERE fresh_at < ?
-           ORDER BY rowid DESC LIMIT 4`,
+           ORDER BY fresh_at ASC LIMIT 4`,
         )
           .bind(new Date(Date.now() - 6 * 3600e3).toISOString())
-          .all<{ ecosystem: "npm" | "pypi"; package: string; from_version: string; to_version: string }>();
+          .all<{ ecosystem: "npm" | "pypi"; package: string; from_version: string; to_version: string; runtime_key: string }>();
         for (const r of rows.results ?? []) {
+          const runtime: UpgradeCheckRequest["runtime"] = {};
+          for (const part of r.runtime_key.split(",")) {
+            if (part.startsWith("node:")) runtime.node = part.slice(5);
+            if (part.startsWith("py:")) runtime.python = part.slice(3);
+          }
           const req: UpgradeCheckRequest = {
             ecosystem: r.ecosystem,
             package: r.package,
             current_version: r.from_version,
             target_version: r.to_version,
+            ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
           };
           await checkUpgrade(env, req);
         }

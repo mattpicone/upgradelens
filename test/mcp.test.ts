@@ -64,7 +64,46 @@ describe("MCP protocol", () => {
       expect(t.description).toMatch(/Use when|Use after/);
       expect(t.description).toMatch(/Do not use/);
       expect(t.inputSchema.type).toBe("object");
+      expect(t.outputSchema.type).toBe("object");
+      expect(t.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      });
     }
+  });
+
+  it("rejects browser requests from unapproved origins", async () => {
+    const res = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://attacker.example" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "tools/list" }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects unsupported protocol headers", async () => {
+    const res = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "mcp-protocol-version": "1999-01-01" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 32, method: "tools/list" }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects JSON-RPC batches", async () => {
+    const res = await rpc([{ jsonrpc: "2.0", id: 33, method: "ping" }]);
+    expect(res.status).toBe(400);
   });
 
   it("returns method not found for unknown methods", async () => {
@@ -210,5 +249,7 @@ describe("MCP tools/call end-to-end (mocked upstreams)", () => {
     expect(sc.candidates.length).toBeGreaterThan(0);
     expect(sc.candidates[0].version).toBe("1.3.0");
     expect(sc.candidates[0].rationale.length).toBeGreaterThan(0);
+    expect(sc.candidates[0].requires_full_check).toBe(true);
+    expect(sc.candidates[0].decision).not.toBe("proceed");
   });
 });

@@ -47,7 +47,7 @@ describe("REST validation and errors", () => {
       current_version: "1.0.0",
       target_version: "1.0.1",
     };
-    const res = await post("/v1/upgrade/batch", { pairs: Array(9).fill(pair) });
+    const res = await post("/v1/upgrade/batch", { pairs: Array(6).fill(pair) });
     expect(res.status).toBe(400);
     const body = (await res.json()) as any;
     expect(body.error.code).toBe("batch_too_large");
@@ -65,6 +65,22 @@ describe("REST validation and errors", () => {
       fakeCtx,
     );
     expect(res.status).toBe(413);
+  });
+
+  it("counts the actual body when Content-Length is absent", async () => {
+    const res = await app.request(
+      "/v1/upgrade/check",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(33 * 1024) }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("payload_too_large");
   });
 
   it("404s unknown endpoints with pointer to docs", async () => {
@@ -109,7 +125,8 @@ describe("meta surfaces", () => {
     const res = await app.request("/pricing.json", {}, env, fakeCtx);
     const body = (await res.json()) as any;
     expect(body.mode).toBe("free_validation");
-    expect(body.paid.status).toBe("prepared_not_active");
+    expect(body.paid.status).toBe("blocked_pending_payment_implementation");
+    expect(body.payment_activation.ready).toBe(false);
   });
 
   it("healthz responds", async () => {

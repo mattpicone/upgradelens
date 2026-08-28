@@ -4,6 +4,10 @@ export interface Env {
   SERVICE_VERSION: string;
   PAYMENTS_ENABLED: string;
   PUBLIC_BASE_URL: string;
+  ALLOWED_ORIGINS?: string;
+  X402_PAY_TO?: string;
+  ANON_RATE_LIMITER?: RateLimit;
+  KEY_RATE_LIMITER?: RateLimit;
   OWNER_TOKEN?: string;
   ADMIN_KEY?: string;
 }
@@ -11,6 +15,27 @@ export interface Env {
 export type Ecosystem = "npm" | "pypi";
 
 export type Decision = "proceed" | "review_required" | "block" | "unknown";
+
+export type CoverageStatus =
+  | "complete"
+  | "partial"
+  | "unavailable"
+  | "not_applicable"
+  | "not_covered";
+
+export interface SourceCoverage {
+  status: CoverageStatus;
+  as_of: string | null;
+  detail?: string;
+}
+
+export interface AnalysisCoverage {
+  registry: SourceCoverage;
+  osv: SourceCoverage;
+  deps_dev: SourceCoverage;
+  eol: SourceCoverage;
+  breaking_changes: SourceCoverage;
+}
 
 export interface Evidence {
   id: string;
@@ -49,6 +74,7 @@ export interface UpgradeCheckRequest {
 
 export interface UpgradeCheckResult {
   decision: Decision;
+  action_allowed: boolean;
   risk_score: number;
   ecosystem: Ecosystem;
   package: string;
@@ -89,7 +115,9 @@ export interface UpgradeCheckResult {
     source_url: string;
   }[];
   reasons: string[];
+  claim_evidence: { claim: string; evidence_ids: string[] }[];
   evidence: Evidence[];
+  coverage: AnalysisCoverage;
   confidence: number;
   freshness: string;
   analysis_version: string;
@@ -116,6 +144,7 @@ export interface TargetCandidate {
   introduces_advisories: string[];
   semver_jump: string;
   published_at: string | null;
+  requires_full_check: boolean;
 }
 
 export interface FindTargetResult {
@@ -125,6 +154,7 @@ export interface FindTargetResult {
   latest_stable: string | null;
   candidates: TargetCandidate[];
   evidence: Evidence[];
+  coverage: Pick<AnalysisCoverage, "deps_dev" | "osv">;
   confidence: number;
   freshness: string;
   analysis_version: string;

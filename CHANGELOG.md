@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 — 2026-08-28
+
+Correctness and free-tier hardening release.
+
+- Replaced npm version/range behavior with strict `node-semver` reference semantics and expanded PEP 440 handling for epochs, locals, post/dev releases, compatible releases, wildcards and malformed clauses.
+- Made incomplete OSV, registry, mapped-EOL and runtime evidence produce `unknown`; preserved blockers for no-ops; added deliberate pre-1.0 npm and PyPI CalVer review behavior; fixed downgrade-range and epoch-aware target selection.
+- Added `action_allowed`, claim-to-evidence links and explicit per-source coverage. Candidate discovery can no longer authorize an edit without a full pair check.
+- Added MCP output schemas, read-only/idempotent annotations, Origin and protocol validation, bounded bodies, single-message semantics and tool-only telemetry.
+- Added edge burst limiting, batch-unit charging, bounded key issuance and retention, fail-closed counters, global daily/cold-cache fuses, short outage caching, upstream response caps and lower batch concurrency.
+- Blocked payment activation until verification, settlement, replay protection and entitlement lifecycle are implemented; replaced traffic-only triggers with retained-use, reliability, unknown-rate and paid-intent gates.
+- Removed a redundant D1 index and widened deterministic release-note enrichment coverage to 30 recent releases.
+
 ## 0.1.0 — 2026-08-28
 
 Initial public release.

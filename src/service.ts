@@ -7,6 +7,7 @@ import type {
   UpgradeCheckResult,
   UpgradePlanResult,
   FindTargetResult,
+  SourceCoverage,
 } from "./types";
 import {
   analyzeUpgrade,
@@ -14,8 +15,11 @@ import {
   type BreakingChangeRow,
 } from "./engine/analyze";
 import { findSafeTarget } from "./engine/target";
+import { reserveCacheMiss } from "./telemetry";
 
 const PAIR_TTL_MS = 6 * 60 * 60 * 1000; // 6h freshness for cached pair analyses
+const UNKNOWN_PAIR_TTL_MS = 5 * 60 * 1000; // short outage cache prevents retry amplification
+const MAX_PERSISTED_EVIDENCE = 12;
 
 function runtimeKey(req: UpgradeCheckRequest): string {
   const r = req.runtime;
@@ -25,21 +29,68 @@ function runtimeKey(req: UpgradeCheckRequest): string {
     .join(",");
 }
 
+const CURATED_BREAKING_PACKAGES = new Set([
+  "npm:express", "npm:react", "npm:next", "npm:vue", "npm:typescript", "npm:eslint",
+  "npm:vite", "npm:axios", "npm:jest", "npm:webpack", "npm:tailwindcss", "npm:zod",
+  "pypi:django", "pypi:fastapi", "pypi:flask", "pypi:requests", "pypi:pydantic",
+  "pypi:sqlalchemy", "pypi:numpy", "pypi:pandas", "pypi:httpx", "pypi:celery",
+]);
+
 export async function loadBreakingChanges(
   env: Env,
   ecosystem: string,
   pkg: string,
-): Promise<BreakingChangeRow[]> {
+): Promise<{ rows: BreakingChangeRow[]; coverage: SourceCoverage }> {
   try {
-    const rows = await env.DB.prepare(
-      `SELECT version, summary, severity, source_url, confidence, fetched_at
-       FROM breaking_changes WHERE ecosystem = ? AND package = ? LIMIT 200`,
-    )
-      .bind(ecosystem, pkg)
-      .all<BreakingChangeRow>();
-    return rows.results ?? [];
+    const [rows, snapshot] = await Promise.all([
+      env.DB.prepare(
+        `SELECT version, summary, severity, source_url, confidence, fetched_at
+         FROM breaking_changes WHERE ecosystem = ? AND package = ?
+         ORDER BY fetched_at DESC, id DESC`,
+      ).bind(ecosystem, pkg).all<BreakingChangeRow>(),
+      env.DB.prepare(
+        `SELECT last_success_at FROM source_snapshots WHERE source='github_enrichment'`,
+      ).first<{ last_success_at: string | null }>(),
+    ]);
+    const result = rows.results ?? [];
+    const curated = CURATED_BREAKING_PACKAGES.has(`${ecosystem}:${pkg.toLowerCase()}`);
+    if (!curated && result.length === 0) {
+      return {
+        rows: [],
+        coverage: {
+          status: "not_covered",
+          as_of: snapshot?.last_success_at ?? null,
+          detail: "This package is outside the curated release-note enrichment set.",
+        },
+      };
+    }
+    if (!snapshot?.last_success_at) {
+      return {
+        rows: result,
+        coverage: {
+          status: "unavailable",
+          as_of: null,
+          detail: "Release-note enrichment has not completed successfully.",
+        },
+      };
+    }
+    return {
+      rows: result,
+      coverage: {
+        status: "partial",
+        as_of: snapshot.last_success_at,
+        detail: "Deterministic extraction covers the 30 most recent GitHub releases for curated packages.",
+      },
+    };
   } catch {
-    return [];
+    return {
+      rows: [],
+      coverage: {
+        status: "unavailable",
+        as_of: null,
+        detail: "Breaking-change storage could not be read.",
+      },
+    };
   }
 }
 
@@ -63,8 +114,9 @@ async function getCachedPair(
       )
       .first<{ response_json: string; fresh_at: string }>();
     if (!row) return null;
-    if (Date.now() - new Date(row.fresh_at).getTime() > PAIR_TTL_MS) return null;
     const parsed = JSON.parse(row.response_json) as UpgradeCheckResult;
+    const ttl = parsed.decision === "unknown" ? UNKNOWN_PAIR_TTL_MS : PAIR_TTL_MS;
+    if (Date.now() - new Date(row.fresh_at).getTime() > ttl) return null;
     parsed.cache_hit = true;
     return parsed;
   } catch {
@@ -100,7 +152,7 @@ async function savePair(
     ),
   ];
   // Persist evidence for GET /v1/evidence/{id} resolution (bounded, idempotent).
-  for (const e of result.evidence.slice(0, 20)) {
+  for (const e of result.evidence.slice(0, MAX_PERSISTED_EVIDENCE)) {
     stmts.push(
       env.DB.prepare(
         `INSERT OR IGNORE INTO release_evidence
@@ -119,13 +171,17 @@ async function savePair(
       ),
     );
   }
-  stmts.push(
-    env.DB.prepare(
-      `INSERT INTO source_snapshots (source, last_success_at) VALUES ('analysis', ?)
-       ON CONFLICT(source) DO UPDATE SET last_success_at=excluded.last_success_at`,
-    ).bind(result.freshness),
-  );
-  if (result.repository_url) {
+  // An unknown result is useful as a very short negative cache, but it must not
+  // make health reporting claim a successful analysis refresh.
+  if (result.decision !== "unknown") {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO source_snapshots (source, last_success_at) VALUES ('analysis', ?)
+         ON CONFLICT(source) DO UPDATE SET last_success_at=excluded.last_success_at`,
+      ).bind(result.freshness),
+    );
+  }
+  if (result.decision !== "unknown" && result.repository_url) {
     stmts.push(
       env.DB.prepare(
         `INSERT INTO packages (ecosystem, name, repository_url, latest_stable, updated_at)
@@ -148,13 +204,70 @@ export async function checkUpgrade(
 ): Promise<UpgradeCheckResult> {
   const cached = await getCachedPair(env, req);
   if (cached) return cached;
-  const breakingChanges = await loadBreakingChanges(env, req.ecosystem, req.package);
-  const result = await analyzeUpgrade(req, { breakingChanges });
+  if (!(await reserveCacheMiss(env))) {
+    const now = new Date().toISOString();
+    const unavailable: SourceCoverage = {
+      status: "unavailable",
+      as_of: null,
+      detail: "The daily cache-miss safety budget is exhausted; no upstream claims were made.",
+    };
+    return {
+      decision: "unknown",
+      action_allowed: false,
+      risk_score: 50,
+      ecosystem: req.ecosystem,
+      package: req.package,
+      current_version: req.current_version,
+      target_version: req.target_version,
+      latest_stable: null,
+      repository_url: null,
+      version_facts: {
+        current_published_at: null,
+        target_published_at: null,
+        current_yanked: false,
+        target_yanked: false,
+        package_deprecated: false,
+        target_deprecation_message: null,
+        is_downgrade: false,
+        semver_jump: "unknown",
+        versions_between: null,
+      },
+      security_delta: {
+        advisories_affecting_current: [],
+        advisories_fixed_by_target: [],
+        advisories_affecting_target: [],
+      },
+      compatibility: {
+        runtime_supported: null,
+        runtime_notes: [],
+        dependency_changes: null,
+        license_change: null,
+      },
+      breaking_changes: [],
+      reasons: ["Daily cache-miss safety budget exhausted; retry after 00:00 UTC."],
+      claim_evidence: [],
+      evidence: [],
+      coverage: {
+        registry: unavailable,
+        osv: unavailable,
+        deps_dev: unavailable,
+        eol: unavailable,
+        breaking_changes: unavailable,
+      },
+      confidence: 0.2,
+      freshness: now,
+      analysis_version: env.ANALYSIS_VERSION,
+      cache_hit: false,
+    };
+  }
+  const breaking = await loadBreakingChanges(env, req.ecosystem, req.package);
+  const result = await analyzeUpgrade(req, {
+    breakingChanges: breaking.rows,
+    breakingCoverage: breaking.coverage,
+  });
   result.analysis_version = env.ANALYSIS_VERSION;
   result.cache_hit = false;
-  if (result.decision !== "unknown") {
-    await savePair(env, req, result);
-  }
+  await savePair(env, req, result);
   return result;
 }
 

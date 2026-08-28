@@ -9,6 +9,7 @@ import type {
   UpgradeCheckResult,
   UpgradePlanResult,
   MigrationAction,
+  SourceCoverage,
 } from "../types";
 import { classifyJump, compareVersions, isPrerelease } from "./semver";
 import { classifyJumpPy, compareVersionsPy, isPrereleasePy } from "./pep440";
@@ -73,6 +74,7 @@ export interface BreakingChangeRow {
 export interface AnalyzeDeps {
   // Precomputed breaking changes between (from, to], loaded from D1 by caller.
   breakingChanges?: BreakingChangeRow[];
+  breakingCoverage?: SourceCoverage;
 }
 
 const advisoryKey = (a: AdvisorySummary) => a.id;
@@ -96,10 +98,35 @@ export async function analyzeUpgrade(
     queryOsvPair(ecosystem, pkg, current_version, target_version),
     eolProduct ? fetchEol(eolProduct) : Promise.resolve(null),
   ]);
+  const coverage: UpgradeCheckResult["coverage"] = {
+    registry: {
+      status: curDetail.ok && tgtDetail.ok ? "complete" : "unavailable",
+      as_of: tgtDetail.fetched_at,
+    },
+    osv: {
+      status: osv.current.ok && osv.target.ok ? "complete" : "unavailable",
+      as_of: osv.current.fetched_at,
+    },
+    deps_dev: {
+      status: pkgVersions.ok ? "complete" : "unavailable",
+      as_of: pkgVersions.fetched_at,
+    },
+    eol: !eolProduct
+      ? { status: "not_applicable", as_of: null }
+      : eol?.ok
+        ? { status: "complete", as_of: eol.fetched_at }
+        : { status: "unavailable", as_of: eol?.fetched_at ?? null },
+    breaking_changes: deps.breakingCoverage ?? {
+      status: "not_covered",
+      as_of: null,
+      detail: "No maintained release-note coverage is available for this package.",
+    },
+  };
 
   // ---- Existence / availability ----
   const unknown = (why: string): UpgradeCheckResult => ({
     decision: "unknown",
+    action_allowed: false,
     risk_score: 50,
     ecosystem,
     package: pkg,
@@ -131,7 +158,9 @@ export async function analyzeUpgrade(
     },
     breaking_changes: [],
     reasons: [why],
+    claim_evidence: [],
     evidence,
+    coverage,
     confidence: 0.3,
     freshness: now,
     analysis_version: "",
@@ -154,22 +183,22 @@ export async function analyzeUpgrade(
         tgtDetail.fetched_at,
       ),
     );
+    result.claim_evidence = [{ claim: result.reasons[0]!, evidence_ids: [evidence.at(-1)!.id] }];
     return result;
-  }
-  if (!curDetail.ok && curDetail.status === 404) {
-    reasons.push(
-      `Current version ${current_version} was not found in the registry; analysis proceeds on target data only.`,
-    );
-    confidence -= 0.15;
   }
   if (!tgtDetail.ok || !tgtDetail.data) {
     return unknown(
       `Registry data for ${pkg}@${target_version} is unavailable (${tgtDetail.error ?? "fetch failed"}). Returning unknown rather than guessing.`,
     );
   }
+  if (!curDetail.ok || !curDetail.data) {
+    return unknown(
+      `Registry data for the current version ${pkg}@${current_version} is unavailable (${curDetail.error ?? "fetch failed"}); dependency, license and compatibility deltas cannot be verified.`,
+    );
+  }
 
   const tgt = tgtDetail.data;
-  const cur: VersionDetail | null = curDetail.ok ? curDetail.data : null;
+  const cur: VersionDetail = curDetail.data;
 
   // ---- Version facts ----
   const versionList = pkgVersions.ok ? (pkgVersions.data?.versions ?? []) : [];
@@ -198,7 +227,7 @@ export async function analyzeUpgrade(
 
   const findPublished = (version: string): string | null =>
     versionList.find((v) => v.version === version)?.published_at ?? null;
-  const current_published_at = findPublished(current_version) ?? cur?.published_at ?? null;
+  const current_published_at = findPublished(current_version) ?? cur.published_at ?? null;
   const target_published_at = findPublished(target_version) ?? tgt.published_at ?? null;
 
   let versions_between: number | null = null;
@@ -220,16 +249,14 @@ export async function analyzeUpgrade(
       tgt.fetched_at,
     ),
   );
-  if (cur) {
-    evidence.push(
-      ev(
-        "registry",
-        cur.source_url,
-        `${pkg}@${current_version}: yanked=${cur.yanked}, runtime_requirement=${cur.runtime_requirement ?? "none"}, license=${cur.license ?? "unknown"}`,
-        cur.fetched_at,
-      ),
-    );
-  }
+  evidence.push(
+    ev(
+      "registry",
+      cur.source_url,
+      `${pkg}@${current_version}: yanked=${cur.yanked}, runtime_requirement=${cur.runtime_requirement ?? "none"}, license=${cur.license ?? "unknown"}`,
+      cur.fetched_at,
+    ),
+  );
 
   // ---- Security delta (OSV) ----
   let advCurrent: AdvisorySummary[] = [];
@@ -265,6 +292,7 @@ export async function analyzeUpgrade(
   // ---- Runtime compatibility ----
   const runtime_notes: string[] = [];
   let runtime_supported: boolean | null = null;
+  let runtimeUnverified = false;
   const runtimeVersion = ecosystem === "npm" ? req.runtime?.node : req.runtime?.python;
   if (tgt.runtime_requirement) {
     runtime_notes.push(
@@ -282,15 +310,17 @@ export async function analyzeUpgrade(
       } else if (runtime_supported === null) {
         runtime_notes.push(`Could not evaluate requirement expression against ${runtimeVersion}.`);
         confidence -= 0.05;
+        runtimeUnverified = jump !== "none";
       }
     } else {
       runtime_notes.push("No runtime version provided by caller; compatibility not verified.");
+      runtimeUnverified = jump !== "none";
     }
   } else {
     runtime_notes.push("Target declares no runtime requirement.");
     runtime_supported = runtimeVersion ? true : null;
   }
-  if (cur?.runtime_requirement && tgt.runtime_requirement && cur.runtime_requirement !== tgt.runtime_requirement) {
+  if (cur.runtime_requirement && tgt.runtime_requirement && cur.runtime_requirement !== tgt.runtime_requirement) {
     runtime_notes.push(
       `Runtime requirement changed: "${cur.runtime_requirement}" -> "${tgt.runtime_requirement}".`,
     );
@@ -298,30 +328,28 @@ export async function analyzeUpgrade(
 
   // ---- Dependency delta (direct deps from registry metadata) ----
   let dependency_changes: UpgradeCheckResult["compatibility"]["dependency_changes"] = null;
-  if (cur) {
-    const before = cur.dependencies;
-    const after = tgt.dependencies;
-    const added = Object.keys(after).filter((k) => !(k in before));
-    const removed = Object.keys(before).filter((k) => !(k in after));
-    const changed = Object.keys(after)
-      .filter((k) => k in before && before[k] !== after[k])
-      .map((k) => ({ name: k, from: before[k] ?? "", to: after[k] ?? "" }));
-    dependency_changes = { added, removed, changed };
-    if (added.length + removed.length + changed.length > 0) {
-      evidence.push(
-        ev(
-          "registry",
-          tgt.source_url,
-          `Direct dependency delta ${current_version}->${target_version}: +${added.length} added, -${removed.length} removed, ~${changed.length} constraint changes.`,
-          tgt.fetched_at,
-        ),
-      );
-    }
+  const before = cur.dependencies;
+  const after = tgt.dependencies;
+  const added = Object.keys(after).filter((k) => !(k in before));
+  const removed = Object.keys(before).filter((k) => !(k in after));
+  const changed = Object.keys(after)
+    .filter((k) => k in before && before[k] !== after[k])
+    .map((k) => ({ name: k, from: before[k] ?? "", to: after[k] ?? "" }));
+  dependency_changes = { added, removed, changed };
+  if (added.length + removed.length + changed.length > 0) {
+    evidence.push(
+      ev(
+        "registry",
+        tgt.source_url,
+        `Direct dependency delta ${current_version}->${target_version}: +${added.length} added, -${removed.length} removed, ~${changed.length} constraint changes.`,
+        tgt.fetched_at,
+      ),
+    );
   }
 
   // ---- License change ----
   const license_change =
-    cur && cur.license && tgt.license && cur.license !== tgt.license
+    cur.license && tgt.license && cur.license !== tgt.license
       ? { from: cur.license, to: tgt.license }
       : null;
 
@@ -349,9 +377,11 @@ export async function analyzeUpgrade(
 
   // ---- Precomputed breaking changes within (from, to] ----
   const breaking = (deps.breakingChanges ?? []).filter((b) => {
-    const gtFrom = cmpVersions(ecosystem, b.version, current_version);
-    const leTo = cmpVersions(ecosystem, b.version, target_version);
-    return gtFrom !== null && leTo !== null && gtFrom > 0 && leTo <= 0;
+    const lower = is_downgrade ? target_version : current_version;
+    const upper = is_downgrade ? current_version : target_version;
+    const gtLower = cmpVersions(ecosystem, b.version, lower);
+    const leUpper = cmpVersions(ecosystem, b.version, upper);
+    return gtLower !== null && leUpper !== null && gtLower > 0 && leUpper <= 0;
   });
   for (const b of breaking) {
     evidence.push(ev("github_release", b.source_url, b.summary.slice(0, 200), b.fetched_at, b.confidence));
@@ -361,7 +391,11 @@ export async function analyzeUpgrade(
   let risk = 0;
   if (jump === "major") {
     risk += 35;
-    reasons.push(`Major version jump (${current_version} -> ${target_version}).`);
+    reasons.push(
+      ecosystem === "pypi"
+        ? `First PEP 440 release segment changes (${current_version} -> ${target_version}); compatibility cannot be inferred from this ordering change.`
+        : `Major version jump (${current_version} -> ${target_version}).`,
+    );
   } else if (jump === "minor") risk += 10;
   else if (jump === "patch") risk += 2;
   if (isPre(ecosystem, target_version)) {
@@ -371,6 +405,12 @@ export async function analyzeUpgrade(
   if (is_downgrade) {
     risk += 25;
     reasons.push("Target is LOWER than the current version (downgrade).");
+  }
+  const zeroMajorMinor =
+    ecosystem === "npm" && jump === "minor" && current_version.replace(/^v/, "").startsWith("0.");
+  if (zeroMajorMinor) {
+    risk += 20;
+    reasons.push("Pre-1.0 npm minor releases may contain breaking changes and require review.");
   }
   risk += Math.min(introduced.length * 20, 45);
   if (introduced.length > 0) {
@@ -427,7 +467,7 @@ export async function analyzeUpgrade(
   let decision: UpgradeCheckResult["decision"];
   if (tgt.yanked || runtime_supported === false || introduced.length > 0) {
     decision = "block";
-  } else if (!osvOk && jump === "major") {
+  } else if (!osvOk || coverage.eol.status === "unavailable" || runtimeUnverified) {
     decision = "unknown";
   } else if (
     jump === "major" ||
@@ -439,27 +479,43 @@ export async function analyzeUpgrade(
     breaking.length > 0 ||
     isPre(ecosystem, target_version) ||
     license_change !== null
+    || zeroMajorMinor
+    || coverage.deps_dev.status !== "complete"
+    || (zeroMajorMinor && coverage.breaking_changes.status !== "complete")
   ) {
     decision = "review_required";
   } else {
     decision = "proceed";
   }
-  if (jump === "none") {
-    decision = remaining.length > 0 ? "review_required" : "proceed";
-    reasons.push("Current and target versions are identical.");
-  }
+  if (jump === "none") reasons.push("Current and target versions are identical.");
 
   if (license_change) {
     reasons.push(`License changes from ${license_change.from} to ${license_change.to}.`);
   }
   if (decision === "proceed" && reasons.length === 0) {
     reasons.push(
-      `${jump} upgrade with no known new advisories, no yanked/deprecated flags and no documented breaking changes.`,
+      `${jump} upgrade with no blockers found in the sources that were successfully checked.`,
     );
   }
+  if (decision === "unknown") risk = Math.max(risk, 50);
+
+  const evidenceIdsForClaim = (claim: string): string[] => {
+    const lower = claim.toLowerCase();
+    const sourceTypes = lower.includes("advis") || lower.includes("osv")
+      ? ["osv"]
+      : lower.includes("end-of-life") || lower.includes("eol")
+        ? ["endoflife"]
+        : lower.includes("breaking")
+          ? ["github_release"]
+          : lower.includes("runtime") || lower.includes("license") || lower.includes("deprecated") || lower.includes("yanked")
+            ? ["registry"]
+            : ["registry", "deps_dev"];
+    return evidence.filter((item) => sourceTypes.includes(item.source_type)).map((item) => item.id);
+  };
 
   return {
     decision,
+    action_allowed: decision === "proceed",
     risk_score: risk,
     ecosystem,
     package: pkg,
@@ -472,7 +528,7 @@ export async function analyzeUpgrade(
       target_published_at,
       current_yanked: cur?.yanked ?? false,
       target_yanked: tgt.yanked,
-      package_deprecated: false,
+      package_deprecated: tgt.deprecated_message !== null,
       target_deprecation_message: tgt.deprecated_message,
       is_downgrade,
       semver_jump: jump,
@@ -496,7 +552,9 @@ export async function analyzeUpgrade(
       source_url: b.source_url,
     })),
     reasons,
+    claim_evidence: reasons.map((claim) => ({ claim, evidence_ids: evidenceIdsForClaim(claim) })),
     evidence,
+    coverage,
     confidence: Math.max(0.2, Math.round(confidence * 100) / 100),
     freshness: now,
     analysis_version: "",
@@ -512,6 +570,14 @@ export function buildPlan(
   const actions: MigrationAction[] = [];
   const changelog_urls: string[] = [];
   let order = 1;
+
+  if (!check.action_allowed) {
+    actions.push({
+      order: order++,
+      action: `Do not edit dependency files yet: decision is ${check.decision}. Resolve the blocking or insufficient-evidence reasons first, then run check_dependency_upgrade again.`,
+      evidence_ids: check.evidence.map((e) => e.id),
+    });
+  }
 
   const registryUrl =
     check.ecosystem === "npm"
@@ -577,14 +643,16 @@ export function buildPlan(
       evidence_ids: evIds((e) => e.source_type === "registry"),
     });
   }
-  actions.push({
-    order: order++,
-    action:
-      check.ecosystem === "npm"
-        ? `Update the version constraint in package.json to ${check.target_version}, reinstall, then run the project's test suite.`
-        : `Update the version constraint (requirements/pyproject) to ${check.target_version}, reinstall, then run the project's test suite.`,
-    evidence_ids: [],
-  });
+  if (check.action_allowed) {
+    actions.push({
+      order: order++,
+      action:
+        check.ecosystem === "npm"
+          ? `Update the version constraint in package.json to ${check.target_version}, reinstall, then run the project's test suite.`
+          : `Update the version constraint (requirements/pyproject) to ${check.target_version}, reinstall, then run the project's test suite.`,
+      evidence_ids: [],
+    });
+  }
 
   return { ...check, migration_actions: actions, changelog_urls };
 }
