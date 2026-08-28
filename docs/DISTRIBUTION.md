@@ -13,8 +13,8 @@ and exactly what remains.
 | Surface | Status | Notes |
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens with MCP topics for GitHub search discovery |
-| Official MCP Registry (registry.modelcontextprotocol.io) | READY | `server.json` prepared (`io.github.mattpicone/upgradelens`). After deploy: `mcp-publisher login github && mcp-publisher publish server.json` (automated in `scripts/first-deploy.sh`) |
-| llms.txt + OpenAPI + pricing.json | DONE (in code) | Served at the public URL for crawler/agent ingestion |
+| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published 2026-08-28 as `io.github.mattpicone/upgradelens` v0.1.0 (status: active). Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
+| llms.txt + OpenAPI + pricing.json | DONE | Live at https://upgradelens.mattpicone.workers.dev (`/llms.txt`, `/openapi.json`, `/pricing.json`) |
 | PulseMCP | READY | Auto-indexes the official registry; no separate submission needed once registry entry exists. Manual add form: https://www.pulsemcp.com/submit if indexing lags |
 | Glama MCP directory | READY | Indexes official registry + GitHub topics (`mcp-server` topic set). Manual claim possible at https://glama.ai/mcp/servers after registry publish |
 | Smithery | LATER | Focused on hosted/stdio servers; add if remote listings show traction |
@@ -36,7 +36,7 @@ and exactly what remains.
 
 ## Post-deploy checklist (automated where possible)
 
-1. Publish registry entry (`scripts/first-deploy.sh` does this).
+1. ~~Publish registry entry~~ DONE via `Publish to MCP Registry` workflow (2026-08-28).
 2. Verify PulseMCP/Glama picked up the registry entry within ~1 week; if not, use their manual submit forms.
 3. Add the MCP endpoint to the repo About link.
 4. Announce nothing manually — machine legibility over marketing.
