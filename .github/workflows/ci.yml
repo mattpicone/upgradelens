@@ -1,0 +1,50 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Deploy to Cloudflare Workers
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx wrangler deploy
+      - name: Verify deployment health
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          sleep 10
+          URL="${{ vars.SERVICE_URL || 'https://upgradelens.workers.dev' }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -A "upgradelens-ci" "$URL/healthz")
+          echo "healthz -> $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Post-deploy health check failed ($STATUS). Rollback with: npx wrangler rollback"
+            exit 1
+          fi
+      - name: Skip note
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "CLOUDFLARE_API_TOKEN not configured — deploy skipped (tests still gate merges)."

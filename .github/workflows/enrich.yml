@@ -1,0 +1,28 @@
+name: Source enrichment (breaking-change extraction)
+
+on:
+  schedule:
+    - cron: "23 4 * * 1,4" # Mon+Thu 04:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_URL: ${{ vars.SERVICE_URL }}
+      ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run enrichment
+        if: env.SERVICE_URL != '' && env.ADMIN_KEY != ''
+        run: node scripts/enrich.mjs
+      - name: Skip note
+        if: env.SERVICE_URL == '' || env.ADMIN_KEY == ''
+        run: echo "SERVICE_URL/ADMIN_KEY not configured — enrichment skipped."

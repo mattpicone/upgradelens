@@ -1,0 +1,30 @@
+# UpgradeLens — Cloudflare Workers (free plan) configuration.
+# NOTE: KV is intentionally NOT used: the free plan allows only 1,000 KV writes/day,
+# which cannot support per-request rate limiting or caching. D1 (100k writes/day,
+# 5M reads/day) handles cache, telemetry and rate limiting instead.
+
+name = "upgradelens"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[triggers]
+crons = ["17 */6 * * *"] # refresh freshness/aggregate rollups every 6h
+
+[[d1_databases]]
+binding = "DB"
+database_name = "upgradelens"
+database_id = "PLACEHOLDER_SET_AFTER_PROVISIONING"
+
+[vars]
+ANALYSIS_VERSION = "1"
+SERVICE_VERSION = "0.1.0"
+PAYMENTS_ENABLED = "false"
+PUBLIC_BASE_URL = "https://upgradelens.workers.dev"
+
+# Secrets (set via `wrangler secret put`):
+#   OWNER_TOKEN     — auth token for /dashboard and internal-traffic classification
+#   ADMIN_KEY       — key for privileged admin endpoints (precompute upserts from CI)

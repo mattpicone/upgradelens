@@ -1,0 +1,46 @@
+name: Health monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_URL: ${{ vars.SERVICE_URL }}
+    steps:
+      - name: Probe healthz
+        if: env.SERVICE_URL != ''
+        id: probe
+        run: |
+          STATUS=$(curl -s -o /tmp/health.json -w "%{http_code}" -A "upgradelens-monitor" "$SERVICE_URL/healthz" || echo "000")
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          cat /tmp/health.json || true
+          if [ "$STATUS" != "200" ]; then exit 1; fi
+          if grep -q '"degraded"' /tmp/health.json; then
+            echo "status=degraded" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+      - name: Open incident issue on failure
+        if: failure() && env.SERVICE_URL != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Health check failed (${new Date().toISOString().slice(0,16)} UTC)`;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "incident",
+            });
+            if (open.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, labels: ["incident"],
+                body: `Automated probe of ${process.env.SERVICE_URL}/healthz failed with status ${{ steps.probe.outputs.status }}.\n\nRunbook:\n1. Check https://dash.cloudflare.com worker logs.\n2. \`npx wrangler tail upgradelens\`\n3. Roll back if a recent deploy caused it: \`npx wrangler rollback\``,
+              });
+            }
