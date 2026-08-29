@@ -57,7 +57,7 @@ Never log or commit these.
 - Rollback: `npx wrangler rollback`.
 - Logs: `npx wrangler tail upgradelens`.
 - DB schema change: append a new file to `migrations/`, apply with `wrangler d1 execute upgradelens --remote --file=...`. Apply `0002_hardening.sql` to existing deployments with `npm run db:harden:remote`.
-- Owner dashboard: `<SERVICE_URL>/dashboard?token=<OWNER_TOKEN>`.
+- Owner dashboard JSON: `curl --oauth2-bearer "<OWNER_TOKEN>" '<SERVICE_URL>/dashboard?format=json'`.
 
 ## Free-tier budget notes
 

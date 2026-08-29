@@ -61,9 +61,11 @@ describe("MCP protocol", () => {
       "plan_dependency_upgrade",
     ]);
     for (const t of tools) {
-      expect(t.description).toMatch(/Use when|Use after/);
+      expect(t.description).toMatch(/Use (?:only )?when|Use after/);
       expect(t.description).toMatch(/Do not use/);
+      expect(t.description).toMatch(/Read-only and safe to retry/);
       expect(t.inputSchema.type).toBe("object");
+      expect(t.inputSchema.additionalProperties).toBe(false);
       expect(t.outputSchema.type).toBe("object");
       expect(t.annotations).toMatchObject({
         readOnlyHint: true,
@@ -71,6 +73,16 @@ describe("MCP protocol", () => {
         idempotentHint: true,
       });
     }
+    const check = tools.find((t: any) => t.name === "check_dependency_upgrade");
+    const find = tools.find((t: any) => t.name === "find_safe_upgrade_target");
+    const plan = tools.find((t: any) => t.name === "plan_dependency_upgrade");
+    expect(check.description).toMatch(/go\/no-go.*without steps|go\/no-go risk decision/s);
+    expect(check.description).toMatch(/Use plan_dependency_upgrade instead/);
+    expect(find.title).not.toMatch(/Find a safe/i);
+    expect(find.description).toMatch(/candidates are not declared safe/i);
+    expect(plan.description).toMatch(/migration checklist.*refactor actions.*ordered review actions/s);
+    expect(plan.description).toMatch(/Use check_dependency_upgrade instead/);
+    expect(check.inputSchema.properties.runtime.additionalProperties).toBe(false);
   });
 
   it("rejects browser requests from unapproved origins", async () => {

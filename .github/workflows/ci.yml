@@ -17,6 +17,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Score realistic MCP tool-selection evaluation
+        run: npm run eval:selection:score -- evals/mcp-tool-selection.json evals/mcp-tool-selection-results.json
 
   deploy:
     needs: test
@@ -31,23 +33,38 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Deploy to Cloudflare Workers
-        if: env.CLOUDFLARE_API_TOKEN != ''
-        run: npx wrangler deploy
       - name: Apply idempotent D1 hardening migration
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: npx wrangler d1 execute upgradelens --remote --file=./migrations/0002_hardening.sql
+      - name: Create MCP funnel schema before code cutover
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql
+      - name: Deploy to Cloudflare Workers
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx wrangler deploy
+      - name: Close the old-worker telemetry gap
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql
       - name: Verify deployment health
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: |
           sleep 10
-          URL="${{ vars.SERVICE_URL || 'https://upgradelens.workers.dev' }}"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -A "upgradelens-ci" "$URL/healthz")
-          echo "healthz -> $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Post-deploy health check failed ($STATUS). Rollback with: npx wrangler rollback"
-            exit 1
-          fi
+          URL="${{ vars.SERVICE_URL || 'https://upgradelens.mattpicone.workers.dev' }}"
+          BODY=$(curl -fsS -A "upgradelens-ci" "$URL/healthz")
+          echo "$BODY"
+          echo "$BODY" | node -e '
+            let raw="";
+            process.stdin.on("data", d => raw += d).on("end", () => {
+              const health = JSON.parse(raw);
+              if (health.db !== "ok" || health.telemetry_schema !== "ok") {
+                console.error("::error::Post-deploy DB/telemetry schema check failed. Roll back the Worker if needed.");
+                process.exit(1);
+              }
+            });
+          '
+      - name: Activate clean business-validation clock
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql
       - name: Skip note
         if: env.CLOUDFLARE_API_TOKEN == ''
         run: echo "CLOUDFLARE_API_TOKEN not configured — deploy skipped (tests still gate merges)."

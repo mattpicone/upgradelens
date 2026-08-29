@@ -8,5 +8,12 @@ export interface AppVariables {
   cacheHit?: boolean;
   unknownResult?: boolean;
   mcpTool?: string;
+  mcpMethod?: string;
+  mcpToolInvoked?: boolean;
+  mcpRpcErrorCode?: number;
+  mcpErrorKind?: string;
+  mcpProtocolVersion?: string;
+  mcpClientName?: string;
+  mcpClientVersion?: string;
   mcpIsError?: boolean;
 }

@@ -1,0 +1,39 @@
+{
+  "metadata": {
+    "source": "three completed realistic agent-selection passes reported by the selection evaluator",
+    "run_count": 3,
+    "notes": "Each pass used the checked-in corpus, the production tools/list descriptions, and the listed distractor tools. Flags are recorded only for outcomes explicitly reported by the evaluator: 30/30 labels and sequences per pass, 18/18 positive cases, 0/12 negative UpgradeLens invocations, zero invented versions, zero unsupported-ecosystem calls, and zero unsafe edits after find."
+  },
+  "results": [
+    { "id": "C1", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "C2", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "C3", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "C4", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "C5", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "C6", "first_actions": ["check_dependency_upgrade", "check_dependency_upgrade", "check_dependency_upgrade"], "sequences": [["check_dependency_upgrade"], ["check_dependency_upgrade"], ["check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "F1", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target"], ["find_safe_upgrade_target"], ["find_safe_upgrade_target"]], "required_arguments_accurate": true },
+    { "id": "F2", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target"], ["find_safe_upgrade_target"], ["find_safe_upgrade_target"]], "required_arguments_accurate": true },
+    { "id": "F3", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target"], ["find_safe_upgrade_target"], ["find_safe_upgrade_target"]], "required_arguments_accurate": true },
+    { "id": "F4", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target"], ["find_safe_upgrade_target"], ["find_safe_upgrade_target"]], "required_arguments_accurate": true },
+    { "id": "F5", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target", "check_dependency_upgrade"], ["find_safe_upgrade_target", "check_dependency_upgrade"], ["find_safe_upgrade_target", "check_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "F6", "first_actions": ["find_safe_upgrade_target", "find_safe_upgrade_target", "find_safe_upgrade_target"], "sequences": [["find_safe_upgrade_target", "plan_dependency_upgrade"], ["find_safe_upgrade_target", "plan_dependency_upgrade"], ["find_safe_upgrade_target", "plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P1", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P2", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P3", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P4", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P5", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "P6", "first_actions": ["plan_dependency_upgrade", "plan_dependency_upgrade", "plan_dependency_upgrade"], "sequences": [["plan_dependency_upgrade"], ["plan_dependency_upgrade"], ["plan_dependency_upgrade"]], "required_arguments_accurate": true },
+    { "id": "N1", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N2", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N3", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N4", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N5", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N6", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N7", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N8", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N9", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N10", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N11", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] },
+    { "id": "N12", "first_actions": ["none", "none", "none"], "sequences": [[], [], []] }
+  ]
+}

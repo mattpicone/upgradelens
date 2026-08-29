@@ -14,9 +14,14 @@ import {
   identifyCaller,
   checkRateLimit,
   recordUsage,
+  recordMcpEvent,
+  classifyMcpEvent,
+  classifyMcpActor,
+  classifyMcpSource,
   cleanupRateCounters,
   cleanupUsageEvents,
 } from "./telemetry";
+import { MCP_BUSINESS_TOOL_NAMES } from "./mcp/server";
 import { checkUpgrade } from "./service";
 
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -46,6 +51,35 @@ app.use("*", async (c, next) => {
     // request-size guard
     const len = Number(c.req.header("content-length") ?? "0");
     if (len > 32 * 1024) {
+      if (path === "/mcp") {
+        const source = classifyMcpSource(
+          caller.internal,
+          caller.authState,
+          c.req.header("user-agent"),
+        );
+        recordMcpEvent(c.env, c.executionCtx, {
+          request_id: requestId,
+          external: !caller.internal,
+          traffic_class: source.trafficClass,
+          actor_class: classifyMcpActor(source, false, false),
+          verification_kind: source.verificationKind,
+          classification_reason: source.reason,
+          client_key: caller.clientKey,
+          http_method: c.req.method,
+          event_kind: "invalid",
+          known_tool: false,
+          tool_invoked: false,
+          error_kind: "payload_too_large",
+          owned_test: caller.internal,
+          cache_hit: false,
+          status: 413,
+          latency_ms: Date.now() - started,
+          unknown_result: false,
+          auth_state: caller.authState,
+          user_agent: c.req.header("user-agent") ?? undefined,
+          referrer: c.req.header("referer") ?? undefined,
+        });
+      }
       return c.json({ error: { code: "payload_too_large", message: "Body exceeds 32KB." } }, 413);
     }
     // Protocol, key issuance and evidence lookup get burst protection without
@@ -79,6 +113,35 @@ app.use("*", async (c, next) => {
         user_agent: c.req.header("user-agent") ?? undefined,
         referrer: c.req.header("referer") ?? undefined,
       });
+      if (path === "/mcp") {
+        const source = classifyMcpSource(
+          caller.internal,
+          caller.authState,
+          c.req.header("user-agent"),
+        );
+        recordMcpEvent(c.env, c.executionCtx, {
+          request_id: requestId,
+          external: !caller.internal,
+          traffic_class: source.trafficClass,
+          actor_class: classifyMcpActor(source, false, false),
+          verification_kind: source.verificationKind,
+          classification_reason: source.reason,
+          client_key: caller.clientKey,
+          http_method: c.req.method,
+          event_kind: "rate_limited",
+          known_tool: false,
+          tool_invoked: false,
+          error_kind: "rate_limited",
+          owned_test: caller.internal,
+          cache_hit: false,
+          status: 429,
+          latency_ms: Date.now() - started,
+          unknown_result: false,
+          auth_state: caller.authState,
+          user_agent: c.req.header("user-agent") ?? undefined,
+          referrer: c.req.header("referer") ?? undefined,
+        });
+      }
       return res;
     }
   }
@@ -87,13 +150,16 @@ app.use("*", async (c, next) => {
 
   if (metered) {
     const mcpTool = c.get("mcpTool");
-    const track = TRACKED_REST_PATHS.has(path) || (path === "/mcp" && Boolean(mcpTool));
+    // After the funnel cutover, MCP writes only to mcp_events. Dual-writing the
+    // same request into legacy usage_events creates a migration race in which a
+    // lossy v0 backfill can win the unique request_id before rich v1 telemetry.
+    const track = TRACKED_REST_PATHS.has(path);
     if (track) recordUsage(c.env, c.executionCtx, {
       request_id: requestId,
       external: !caller.internal,
       client_key: caller.clientKey,
-      surface: path === "/mcp" ? "mcp" : "rest",
-      tool: path === "/mcp" ? (mcpTool ? `mcp:${mcpTool}` : "mcp:protocol") : path,
+      surface: "rest",
+      tool: path,
       ecosystem: c.get("meta")?.ecosystem,
       package: c.get("meta")?.package,
       cache_hit: c.get("cacheHit") === true,
@@ -105,6 +171,50 @@ app.use("*", async (c, next) => {
       user_agent: c.req.header("user-agent") ?? undefined,
       referrer: c.req.header("referer") ?? undefined,
     });
+    if (path === "/mcp") {
+      const rpcMethod = c.get("mcpMethod");
+      const knownTool = Boolean(mcpTool && MCP_BUSINESS_TOOL_NAMES.has(mcpTool));
+      const toolInvoked = c.get("mcpToolInvoked") === true;
+      const status = c.get("mcpIsError") ? 422 : c.res.status;
+      const source = classifyMcpSource(
+        caller.internal,
+        caller.authState,
+        c.req.header("user-agent"),
+        mcpTool,
+      );
+      recordMcpEvent(c.env, c.executionCtx, {
+        request_id: requestId,
+        external: !caller.internal,
+        traffic_class: source.trafficClass,
+        actor_class: classifyMcpActor(source, knownTool, toolInvoked),
+        verification_kind: source.verificationKind,
+        classification_reason: source.reason,
+        client_key: caller.clientKey,
+        http_method: c.req.method,
+        rpc_method: rpcMethod,
+        event_kind: classifyMcpEvent(rpcMethod, c.req.method),
+        requested_tool: mcpTool,
+        business_tool: knownTool ? mcpTool : undefined,
+        known_tool: knownTool,
+        tool_invoked: toolInvoked,
+        tool_success: toolInvoked ? status < 400 && c.get("mcpIsError") !== true : undefined,
+        rpc_error_code: c.get("mcpRpcErrorCode"),
+        error_kind: c.get("mcpErrorKind") ?? (status >= 500 ? "server_error" : undefined),
+        protocol_version: c.get("mcpProtocolVersion"),
+        owned_test: caller.internal,
+        ecosystem: c.get("meta")?.ecosystem,
+        package: c.get("meta")?.package,
+        cache_hit: c.get("cacheHit") === true,
+        status,
+        latency_ms: Date.now() - started,
+        unknown_result: c.get("unknownResult") === true,
+        auth_state: caller.authState,
+        client_name: c.get("mcpClientName"),
+        client_version: c.get("mcpClientVersion"),
+        user_agent: c.req.header("user-agent") ?? undefined,
+        referrer: c.req.header("referer") ?? undefined,
+      });
+    }
   }
 });
 

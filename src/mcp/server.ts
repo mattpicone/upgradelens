@@ -22,6 +22,7 @@ const LATEST_PROTOCOL = "2025-06-18";
 
 const CHECK_INPUT_SCHEMA = {
   type: "object",
+  additionalProperties: false,
   required: ["ecosystem", "package", "current_version", "target_version"],
   properties: {
     ecosystem: {
@@ -40,6 +41,7 @@ const CHECK_INPUT_SCHEMA = {
     },
     runtime: {
       type: "object",
+      additionalProperties: false,
       description:
         "Optional runtime versions for compatibility checking, e.g. {\"node\":\"20.11.0\"} or {\"python\":\"3.12\"}.",
       properties: {
@@ -109,20 +111,21 @@ const READ_ONLY_ANNOTATIONS = {
 export const MCP_TOOLS = [
   {
     name: "check_dependency_upgrade",
-    title: "Check a dependency upgrade (known target version)",
+    title: "Assess a known dependency upgrade target (go/no-go)",
     description:
-      "Use when you are about to change a software package from a known current version to a known target version. Returns proceed | review_required | block | unknown, action_allowed, explicit per-source coverage, and source-cited security, compatibility, EOL and breaking-change evidence. Only edit dependency files when action_allowed is true. Supports npm and PyPI. Do not use merely to install a package, search documentation, or when the target is unknown (use find_safe_upgrade_target).",
+      "Use when evaluating an existing dependency from one exact installed version to one exact target version and the caller needs a go/no-go risk decision before editing. Returns decision/action_allowed plus source-cited vulnerability delta, registry-declared Node/Python compatibility, direct-dependency changes, EOL, and documented breaking-change evidence for npm or PyPI. Use plan_dependency_upgrade instead when migration, refactor, changelog, or test steps are requested. Do not use to choose a target, install a new package, inspect only one version, answer general documentation questions, or analyze another ecosystem. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
     inputSchema: CHECK_INPUT_SCHEMA,
     outputSchema: CHECK_OUTPUT_SCHEMA,
     annotations: READ_ONLY_ANNOTATIONS,
   },
   {
     name: "find_safe_upgrade_target",
-    title: "Find a safe upgrade target (target version unknown)",
+    title: "Rank candidate upgrade targets (target unknown; full check required)",
     description:
-      "Use when a dependency should be upgraded but the target is unknown, and only to discover candidate versions. This is ranking, not authorization: every candidate has requires_full_check=true and must be passed to check_dependency_upgrade before editing dependency files. Returns unknown security status if OSV is unavailable. Supports npm and PyPI. Do not use when the target is already chosen or for newly installed packages.",
+      "Use only when an existing npm or PyPI dependency has an exact current version but no target version has been chosen. Ranks candidates using version distance and OSV advisory deltas; candidates are not declared safe. Every candidate requires either check_dependency_upgrade for a decision or plan_dependency_upgrade when migration steps are requested; the plan tool already includes the full check. This tool does not evaluate repository code or caller runtime compatibility. Do not use when a target is stated, for a new installation or simple latest-version lookup, or as authorization to modify files. Read-only and safe to retry; unavailable evidence is returned explicitly.",
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       required: ["ecosystem", "package", "current_version"],
       properties: {
         ecosystem: { type: "string", enum: ["npm", "pypi"] },
@@ -167,9 +170,9 @@ export const MCP_TOOLS = [
   },
   {
     name: "plan_dependency_upgrade",
-    title: "Plan a dependency upgrade (migration actions)",
+    title: "Plan a known dependency upgrade (migration/review checklist)",
     description:
-      "Use after a target version has been selected to obtain source-cited review or migration steps. Returns everything from check_dependency_upgrade plus migration_actions and changelog_urls. It never instructs dependency-file edits when action_allowed is false. Supports npm and PyPI. Do not use for general tutorials or package documentation.",
+      "Use when both exact current and target versions are known and the caller asks for a migration checklist, refactor actions, ordered review actions, changelog links, or test steps for that upgrade. Returns the complete upgrade check plus source-linked migration_actions and changelog_urls; actions remain gated by action_allowed. Supports npm and PyPI only. Use check_dependency_upgrade instead for a go/no-go risk decision without steps. Do not use to choose a target, install a package, provide general tutorials, or modify files. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
     inputSchema: CHECK_INPUT_SCHEMA,
     outputSchema: {
       ...CHECK_OUTPUT_SCHEMA,
@@ -183,6 +186,8 @@ export const MCP_TOOLS = [
     annotations: READ_ONLY_ANNOTATIONS,
   },
 ] as const;
+
+export const MCP_BUSINESS_TOOL_NAMES = new Set<string>(MCP_TOOLS.map((tool) => tool.name));
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -241,6 +246,10 @@ async function callTool(
         isError: true,
       };
     }
+    console.error("mcp_tool_execution_failed", {
+      tool: name,
+      error_type: e instanceof Error ? e.name : "unknown",
+    });
     return {
       structured: { error: "Internal analysis error. The service returned no fabricated data." },
       isError: true,
@@ -303,6 +312,7 @@ async function handleMessage(
 export async function handleMcp(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
 ): Promise<Response> {
+  c.set("mcpMethod", `http:${c.req.method.toLowerCase()}`);
   if (c.req.method !== "POST") {
     // Stateless server: no server-initiated streams, no sessions to delete.
     return c.body(null, 405, { Allow: "POST" });
@@ -314,43 +324,93 @@ export async function handleMcp(
       .map((value) => value.trim())
       .filter(Boolean);
     if (!configured.includes(origin)) {
+      c.set("mcpErrorKind", "origin_rejected");
+      c.set("mcpRpcErrorCode", -32600);
       return c.json(rpcError(null, -32600, "Origin is not allowed."), 403);
     }
   }
   const protocolHeader = c.req.header("mcp-protocol-version");
+  if (protocolHeader) c.set("mcpProtocolVersion", protocolHeader);
   if (protocolHeader && !SUPPORTED_PROTOCOLS.includes(protocolHeader)) {
+    c.set("mcpErrorKind", "unsupported_protocol_version");
+    c.set("mcpRpcErrorCode", -32600);
     return c.json(rpcError(null, -32600, `Unsupported MCP-Protocol-Version: ${protocolHeader}`), 400);
   }
 
   const parsed = await readJsonBody(c.req.raw);
-  if (!parsed.ok) return c.json(rpcError(null, parsed.status === 413 ? -32600 : -32700, parsed.message), parsed.status);
+  if (!parsed.ok) {
+    c.set("mcpErrorKind", parsed.status === 413 ? "payload_too_large" : "parse_error");
+    c.set("mcpRpcErrorCode", parsed.status === 413 ? -32600 : -32700);
+    return c.json(rpcError(null, parsed.status === 413 ? -32600 : -32700, parsed.message), parsed.status);
+  }
   const payload = parsed.data;
-  if (Array.isArray(payload)) return c.json(rpcError(null, -32600, "JSON-RPC batches are not accepted by Streamable HTTP."), 400);
+  if (Array.isArray(payload)) {
+    c.set("mcpErrorKind", "batch_not_supported");
+    c.set("mcpRpcErrorCode", -32600);
+    return c.json(rpcError(null, -32600, "JSON-RPC batches are not accepted by Streamable HTTP."), 400);
+  }
 
   const setTool = (t: string) => c.set("mcpTool", t);
   const msg = payload as JsonRpcRequest;
   if (msg?.jsonrpc !== "2.0" || typeof msg.method !== "string") {
+    c.set("mcpErrorKind", "invalid_request");
+    c.set("mcpRpcErrorCode", -32600);
     return c.json(rpcError(null, -32600, "Invalid JSON-RPC message."), 400);
+  }
+  c.set("mcpMethod", msg.method);
+  if (msg.method === "initialize") {
+    if (typeof msg.params?.protocolVersion === "string") {
+      c.set("mcpProtocolVersion", msg.params.protocolVersion);
+    }
+    const clientInfo = msg.params?.clientInfo as
+      | { name?: unknown; version?: unknown }
+      | undefined;
+    if (typeof clientInfo?.name === "string") c.set("mcpClientName", clientInfo.name);
+    if (typeof clientInfo?.version === "string") c.set("mcpClientVersion", clientInfo.version);
   }
   if (msg.method === "tools/call") {
     const name = typeof msg.params?.name === "string" ? msg.params.name : "";
     c.set("mcpTool", name);
-    const daily = await checkRateLimit(c.env, c.get("caller"), { skipEdge: true });
-    c.header("x-ratelimit-remaining-day", String(daily.remaining_day));
-    if (!daily.allowed) {
-      return c.json(
-        rpcError(msg.id ?? null, -32000, "Daily analysis quota exceeded; retry later."),
-        429,
-      );
+    const knownTool = MCP_BUSINESS_TOOL_NAMES.has(name);
+    if (knownTool) {
+      const daily = await checkRateLimit(c.env, c.get("caller"), { skipEdge: true });
+      c.header("x-ratelimit-remaining-day", String(daily.remaining_day));
+      if (!daily.allowed) {
+        c.set("mcpErrorKind", "rate_limited");
+        c.set("mcpRpcErrorCode", -32000);
+        return c.json(
+          rpcError(msg.id ?? null, -32000, "Daily analysis quota exceeded; retry later."),
+          429,
+        );
+      }
     }
+    c.set("mcpToolInvoked", knownTool);
   }
   const response = await handleMessage(c.env, msg, setTool);
   if (response === null) return c.body(null, 202);
-  const rpc = response as { result?: { isError?: boolean; structuredContent?: unknown } };
+  const rpc = response as {
+    result?: { isError?: boolean; structuredContent?: unknown };
+    error?: { code?: number };
+  };
+  if (typeof rpc.error?.code === "number") {
+    c.set("mcpRpcErrorCode", rpc.error.code);
+    c.set("mcpErrorKind", rpc.error.code === -32601 ? "method_not_found" : "rpc_error");
+  }
   if (rpc.result?.isError !== undefined) {
     c.set("mcpIsError", rpc.result.isError === true);
     const structured = rpc.result.structuredContent as Record<string, unknown> | undefined;
     if (structured) {
+      if (rpc.result.isError === true) {
+        const errorText = typeof structured.error === "string" ? structured.error : "";
+        c.set(
+          "mcpErrorKind",
+          errorText.startsWith("Unknown tool:")
+            ? "unknown_tool"
+            : "field" in structured
+              ? "validation_error"
+              : "service_error",
+        );
+      }
       c.set("meta", {
         ecosystem: typeof structured.ecosystem === "string" ? structured.ecosystem : undefined,
         package: typeof structured.package === "string" ? structured.package : undefined,

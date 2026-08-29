@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY,
   request_id TEXT NOT NULL,
   ts TEXT NOT NULL,
-  external INTEGER NOT NULL,             -- 1 = counts toward business metrics
+  external INTEGER NOT NULL,             -- 1 = external origin; not sufficient for business metrics
   client_key TEXT,                        -- key hash prefix or 'anon:<ip-hash>'
   surface TEXT NOT NULL,                  -- rest | mcp | dashboard | meta
   tool TEXT NOT NULL,                     -- endpoint path or MCP tool name
@@ -95,6 +95,47 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts);
 CREATE INDEX IF NOT EXISTS idx_usage_client ON usage_events(client_key, ts);
+
+-- MCP transport and business-funnel telemetry is intentionally separate from
+-- generic REST usage. Protocol discovery must never inflate business status.
+CREATE TABLE IF NOT EXISTS mcp_events (
+  id INTEGER PRIMARY KEY,
+  request_id TEXT NOT NULL UNIQUE,
+  ts TEXT NOT NULL,
+  external INTEGER NOT NULL,
+  traffic_class TEXT NOT NULL,          -- internal | verification | external
+  actor_class TEXT NOT NULL,            -- internal | registry_verifier | auth_verifier | crawler_monitor | external_tool_client | unknown
+  verification_kind TEXT NOT NULL DEFAULT 'none',
+  classification_reason TEXT NOT NULL,
+  classification_version INTEGER NOT NULL,
+  client_key TEXT NOT NULL,
+  http_method TEXT NOT NULL,
+  rpc_method TEXT,
+  event_kind TEXT NOT NULL,             -- initialize | tools_list | tools_call | ...
+  requested_tool TEXT,
+  business_tool TEXT,
+  known_tool INTEGER NOT NULL DEFAULT 0,
+  tool_invoked INTEGER,
+  tool_success INTEGER,
+  rpc_error_code INTEGER,
+  error_kind TEXT,
+  protocol_version TEXT,
+  owned_test INTEGER NOT NULL DEFAULT 0,
+  ecosystem TEXT,
+  package TEXT,
+  cache_hit INTEGER NOT NULL DEFAULT 0,
+  status INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  unknown_result INTEGER NOT NULL DEFAULT 0,
+  auth_state TEXT NOT NULL DEFAULT 'none',
+  client_name TEXT,
+  client_version TEXT,
+  user_agent TEXT,
+  referrer TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_events_ts ON mcp_events(ts);
+CREATE INDEX IF NOT EXISTS idx_mcp_events_client ON mcp_events(client_key, ts);
+CREATE INDEX IF NOT EXISTS idx_mcp_events_funnel ON mcp_events(classification_version, external, traffic_class, event_kind, known_tool, tool_invoked, tool_success, ts);
 
 CREATE TABLE IF NOT EXISTS billing_ledger (
   id INTEGER PRIMARY KEY,

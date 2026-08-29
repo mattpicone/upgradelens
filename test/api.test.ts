@@ -135,6 +135,7 @@ describe("meta surfaces", () => {
     const body = (await res.json()) as any;
     expect(["ok", "degraded"]).toContain(body.status);
     expect(body.service).toBe("upgradelens");
+    expect(["ok", "missing_or_outdated"]).toContain(body.telemetry_schema);
   });
 
   it("landing page is served with MCP config snippet", async () => {
@@ -150,15 +151,49 @@ describe("dashboard auth", () => {
     expect(res.status).toBe(401);
   });
   it("accepts the owner token", async () => {
-    const res = await app.request("/dashboard?token=test-owner-token", {}, env, fakeCtx);
+    const res = await app.request(
+      "/dashboard",
+      { headers: { authorization: "Bearer test-owner-token" } },
+      env,
+      fakeCtx,
+    );
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toMatch(/NO SIGNAL|EARLY SIGNAL|owner dashboard/);
+    expect(html).toMatch(/WAITING FOR FIRST ORGANIC TOOL CALL|owner dashboard/);
+    expect(html).toMatch(/genuine external tools\/call requests/);
+    expect(html).toMatch(/actual UpgradeLens tools invoked/);
+    expect(html).toMatch(/repeat genuine tool clients/);
     expect(html).toMatch(/\$0\.00/);
+    expect(res.headers.get("cache-control")).toMatch(/no-store/);
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it("defines the business population explicitly in JSON", async () => {
+    const res = await app.request(
+      "/dashboard?format=json",
+      { headers: { authorization: "bearer test-owner-token" } },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.business_state.state).toBe("WAITING FOR FIRST ORGANIC TOOL CALL");
+    expect(body.definition.genuine_business_tool_call).toMatch(/post-cutover.*handler invoked.*semantic success/);
+    expect(body.stats.total.success).toBe(0);
+    expect(body.stats.funnel.repeat_genuine_tool_clients).toBe(0);
   });
   it("503s when no owner token is configured", async () => {
-    const res = await app.request("/dashboard?token=x", {}, fakeEnv({ OWNER_TOKEN: undefined }), fakeCtx);
+    const res = await app.request(
+      "/dashboard",
+      { headers: { authorization: "Bearer x" } },
+      fakeEnv({ OWNER_TOKEN: undefined }),
+      fakeCtx,
+    );
     expect(res.status).toBe(503);
+  });
+  it("does not accept owner secrets in the query string", async () => {
+    const res = await app.request("/dashboard?token=test-owner-token", {}, env, fakeCtx);
+    expect(res.status).toBe(401);
   });
 });
 

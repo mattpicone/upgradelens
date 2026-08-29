@@ -230,18 +230,25 @@ Use this service when you are about to edit dependency files (package.json, requ
 
 meta.get("/healthz", async (c) => {
   let dbOk = false;
+  let telemetrySchemaOk = false;
   let analysisFreshness: string | null = null;
   let enrichmentFreshness: string | null = null;
   try {
-    const [analysis, enrichment] = await Promise.all([
+    const [analysis, enrichment, telemetrySchema] = await Promise.all([
       c.env.DB.prepare(
         `SELECT last_success_at FROM source_snapshots WHERE source='analysis'`,
       ).first<{ last_success_at: string }>(),
       c.env.DB.prepare(
         `SELECT last_success_at FROM source_snapshots WHERE source='github_enrichment'`,
       ).first<{ last_success_at: string }>(),
+      c.env.DB.prepare(
+        `SELECT COUNT(*) columns_present FROM pragma_table_info('mcp_events')
+         WHERE name IN ('actor_class','classification_version','event_kind','requested_tool',
+                        'tool_invoked','tool_success','owned_test')`,
+      ).first<{ columns_present: number }>(),
     ]);
     dbOk = true;
+    telemetrySchemaOk = telemetrySchema?.columns_present === 7;
     analysisFreshness = analysis?.last_success_at ?? null;
     enrichmentFreshness = enrichment?.last_success_at ?? null;
   } catch {
@@ -251,13 +258,15 @@ meta.get("/healthz", async (c) => {
   const analysisStale = analysisFreshness !== null && (ageMs(analysisFreshness) ?? 0) > 24 * 3600e3;
   const enrichmentStale = enrichmentFreshness !== null && (ageMs(enrichmentFreshness) ?? 0) > 8 * 864e5;
   const enrichmentMissingAfterUse = analysisFreshness !== null && enrichmentFreshness === null;
-  const degraded = !dbOk || analysisStale || enrichmentStale || enrichmentMissingAfterUse;
+  const degraded =
+    !dbOk || !telemetrySchemaOk || analysisStale || enrichmentStale || enrichmentMissingAfterUse;
   return c.json({
     status: degraded ? "degraded" : "ok",
     service: "upgradelens",
     version: c.env.SERVICE_VERSION,
     analysis_version: c.env.ANALYSIS_VERSION,
     db: dbOk ? "ok" : "unavailable",
+    telemetry_schema: telemetrySchemaOk ? "ok" : "missing_or_outdated",
     last_analysis_at: analysisFreshness,
     last_breaking_change_enrichment_at: enrichmentFreshness,
     freshness: {

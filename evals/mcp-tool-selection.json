@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "labels": ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade", "none"],
+  "distractor_tools": [
+    "get_latest_package_version",
+    "query_package_vulnerabilities",
+    "search_package_docs",
+    "inspect_repository_dependencies",
+    "edit_dependency_manifest",
+    "run_test_suite",
+    "compare_packages",
+    "web_search"
+  ],
+  "cases": [
+    { "id": "C1", "prompt": "Before changing npm express 4.19.2 to 5.1.0 on Node 20.11.0, give me a cited go/no-go.", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+    { "id": "C2", "prompt": "Is PyPI django 4.2.11 to 5.1.1 supported on Python 3.12? Do not make edits.", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+    { "id": "C3", "prompt": "Dependabot proposed lodash 4.17.20 to 4.17.21. Verify fixed CVEs and breaking-change risk.", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+    { "id": "C4", "prompt": "Audit requests 2.31.0 to 2.32.3; decision only, no migration plan.", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+    { "id": "C5", "prompt": "Can package.json move vite 4.5.0 to 5.4.8 on Node 18?", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+    { "id": "C6", "prompt": "What breaks between react 18.2.0 and 19.0.0?", "first_action": "check_dependency_upgrade", "sequence": ["check_dependency_upgrade"] },
+
+    { "id": "F1", "prompt": "We use npm express 4.18.2. Which target should we evaluate?", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
+    { "id": "F2", "prompt": "Our PyPI django is 3.2.25; target is undecided.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
+    { "id": "F3", "prompt": "Find TypeScript candidates above 5.4.5 but remain in major 5.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
+    { "id": "F4", "prompt": "Rank numpy targets from 1.26.4 and include prereleases.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
+    { "id": "F5", "prompt": "Move lodash 4.17.20 to a version that addresses known advisories; target unknown.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target", "check_dependency_upgrade"] },
+    { "id": "F6", "prompt": "Django 4.2.11 needs an upgrade; recommend a target and migration steps.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target", "plan_dependency_upgrade"] },
+
+    { "id": "P1", "prompt": "Plan express 4.19.2 to 5.1.0 with cited code, config, and test steps.", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+    { "id": "P2", "prompt": "Give a Django 4.2.11 to 5.1.1 migration checklist and changelog links.", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+    { "id": "P3", "prompt": "React 19.0.0 is selected from 18.2.0. What must we refactor and test?", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+    { "id": "P4", "prompt": "Plan SQLAlchemy 1.4.54 to 2.0.36; include ordered review actions.", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+    { "id": "P5", "prompt": "Should requests 2.31.0 to 2.32.3 happen, and if so what are the steps?", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+    { "id": "P6", "prompt": "Assess express 4.19.2 to 5.1.0 and include changelog URLs.", "first_action": "plan_dependency_upgrade", "sequence": ["plan_dependency_upgrade"] },
+
+    { "id": "N1", "prompt": "Install the latest express in a new app.", "first_action": "none", "sequence": [] },
+    { "id": "N2", "prompt": "Explain React hooks.", "first_action": "none", "sequence": [] },
+    { "id": "N3", "prompt": "Check cargo serde 1.0.190 to 1.0.210.", "first_action": "none", "sequence": [] },
+    { "id": "N4", "prompt": "What is the latest requests version for a new project?", "first_action": "none", "sequence": [] },
+    { "id": "N5", "prompt": "Which CVEs affect lodash 4.17.20?", "first_action": "none", "sequence": [] },
+    { "id": "N6", "prompt": "Migrate this app from Flask to FastAPI.", "first_action": "none", "sequence": [] },
+    { "id": "N7", "prompt": "Upgrade the Node 20 Docker image to Node 22.", "first_action": "none", "sequence": [] },
+    { "id": "N8", "prompt": "Run npm audit fix and edit package-lock.json.", "first_action": "none", "sequence": [] },
+    { "id": "N9", "prompt": "Update every dependency in package.json.", "first_action": "none", "sequence": [] },
+    { "id": "N10", "prompt": "Show the Django 5.1 changelog.", "first_action": "none", "sequence": [] },
+    { "id": "N11", "prompt": "Can we move Express 4 to 5, and what changes?", "first_action": "none", "sequence": [] },
+    { "id": "N12", "prompt": "I chose React 19.0.0. Is it safe?", "first_action": "none", "sequence": [] }
+  ],
+  "acceptance": {
+    "clear_positive_accuracy_min": 0.95,
+    "per_tool_precision_recall_min": 0.9,
+    "negative_false_invocations_max": 0,
+    "invented_versions_max": 0,
+    "unsupported_ecosystem_invocations_max": 0,
+    "required_argument_accuracy_min": 1.0,
+    "full_sequence_accuracy_min": 0.9,
+    "unsafe_edits_after_find_max": 0,
+    "three_run_label_stability_min": 0.9
+  }
+}

@@ -23,6 +23,7 @@ perl -pi -e "s/^database_id = .*/database_id = \"$DB_ID\"/" wrangler.toml
 
 echo "==> Applying schema"
 npx wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql -y
+npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql -y
 
 echo "==> Setting worker secrets"
 OWNER_TOKEN="ulo_$(openssl rand -hex 24)"
@@ -38,6 +39,7 @@ SUBDOMAIN=$(npx wrangler whoami 2>/dev/null | grep -oE '[a-z0-9-]+@' | head -1 |
 
 echo "==> Deploying"
 npx wrangler deploy
+npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql -y
 
 echo "==> Determining public URL"
 URL=$(npx wrangler deployments list 2>/dev/null | grep -oE 'https://[a-z0-9.-]+workers\.dev' | head -1 || true)
@@ -54,6 +56,7 @@ npx wrangler deploy
 
 echo "==> Verifying health"
 curl -fsS -A "upgradelens-ci" "$URL/healthz"
+npx wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql -y
 
 echo "==> Syncing GitHub automation config"
 gh variable set SERVICE_URL --body "$URL" || true
@@ -77,5 +80,5 @@ mcp-publisher publish server.json
 echo ""
 echo "ALL DONE."
 echo "  Public API + MCP: $URL  ($URL/mcp)"
-echo "  Dashboard:        $URL/dashboard?token=$OWNER_TOKEN"
+echo "  Dashboard:        curl --oauth2-bearer \"<OWNER_TOKEN>\" '$URL/dashboard?format=json'"
 git add -A && git commit -m "Configure production deployment (D1 id, public URL)" && git push
