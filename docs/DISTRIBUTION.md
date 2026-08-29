@@ -14,6 +14,8 @@ and exactly what remains.
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens with MCP topics for GitHub search discovery |
 | Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published as `io.github.mattpicone/upgradelens`; the v0.2.x manifest adds agent-safe action gating, output schemas and read-only/idempotent annotations. Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
+| Gemini CLI extension gallery | READY | Root `gemini-extension.json` and `GEMINI.md` are checked in; immutable `distribution-2026-08-29` tag is pushed. Gallery discovery still requires the public `gemini-cli-extension` repository topic, which needs GitHub Administration permission unavailable to this session |
+| Agent Plugins 1.0 | READY | Root `plugin.json` and `mcp.json` conform to the portable 1.0 layout and contain no credentials. Maintainer-directory submission remains review-gated |
 | llms.txt + OpenAPI + pricing.json | DONE | Live at https://upgradelens.mattpicone.workers.dev (`/llms.txt`, `/openapi.json`, `/pricing.json`) |
 | PulseMCP | READY | Auto-indexes the official registry; no separate submission needed once registry entry exists. Manual add form: https://www.pulsemcp.com/submit if indexing lags |
 | Glama MCP directory | READY | Indexes official registry + GitHub topics (`mcp-server` topic set). Manual claim possible at https://glama.ai/mcp/servers after registry publish |
@@ -37,6 +39,7 @@ and exactly what remains.
 ## Post-deploy checklist (automated where possible)
 
 1. ~~Publish registry entry~~ DONE via `Publish to MCP Registry` workflow (2026-08-28).
-2. Verify PulseMCP/Glama picked up the registry entry within ~1 week; if not, use their manual submit forms.
-3. Add the MCP endpoint to the repo About link.
-4. Run three $0 discovery experiments one at a time: registry listing copy, ecosystem-specific GitHub examples, then directory submissions. Accept an experiment only if attributed successful tool calls include at least 3 independent clients and at least 1 returning client; ignore handshakes, scans, keys and owner traffic.
+2. ~~Prepare free discovery packages~~ DONE: Gemini extension, Agent Plugins 1.0 manifests, install docs, and immutable distribution tag.
+3. Verify PulseMCP/Glama picked up the registry entry within ~1 week; if not, use their manual submit forms.
+4. Add/verify the `gemini-cli-extension` and `agent-plugins` GitHub topics when a GitHub Administration-capable account is available.
+5. Run three $0 discovery experiments one at a time: registry listing copy, ecosystem-specific GitHub examples, then directory submissions. Accept an experiment only if attributed successful tool calls include at least 3 independent clients and at least 1 returning client; ignore handshakes, scans, keys and owner traffic.

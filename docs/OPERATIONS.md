@@ -20,6 +20,7 @@ prepared but inactive until demand thresholds are met.
 - **Cron (Worker):** every 6h — bounded counter/telemetry cleanup + oldest-stale cache refresh.
 - **GitHub Actions:**
   - `ci.yml` — typecheck + tests on every push; deploy on main (needs `CLOUDFLARE_API_TOKEN` secret).
+    The selection corpus scorer is a required CI check.
   - `enrich.yml` — Mon/Thu: deterministic breaking-change extraction from GitHub releases → `/admin/breaking-changes` (needs `ADMIN_KEY` secret + `SERVICE_URL` variable).
   - `health.yml` — every 30 min: probes `/healthz`, opens one deduplicated GitHub issue on failure.
 
@@ -40,8 +41,8 @@ Never log or commit these.
 - External = an actual REST analysis or MCP tool call made without the owner token or a registered internal key. Protocol handshakes, health probes, docs, scans and key issuance never count.
 - Minimum continuation (45 days): >=25 successful external calls AND >=3 unique external clients AND >=1 repeat client. Below that after day 45 → dashboard shows **KILL / PIVOT**.
 - Promising: >=100 successful external calls/30d, >=10 clients, >=3 clients active 3+ days.
-- Strong: >=1,000 calls/30d, >=20 repeat clients, <2% error rate.
-- Paid-pilot eligibility: >=1,000 successful external calls/30d, >=10 clients, >=5 clients active on 3+ days, >=5 repeat clients, <1% server errors and <5% unknown results, plus at least two explicit willing pilot clients. This only authorizes implementing and testing a payment rail; `PAYMENTS_ENABLED` cannot activate charging until verification, settlement, replay protection and entitlements exist.
+- Strong: >=1,000 successful calls/30d, >=20 stable keyed repeat clients, four completed weeks of positive week-over-week growth, <2% service errors, and >75% measurable gross margin. A free-only period has no measurable gross margin and cannot satisfy this gate.
+- Monetization-test trigger: >=500 successful calls/30d AND >=10 stable keyed repeat clients. This authorizes a free-to-paid experiment discussion only; payment activation remains blocked until verification, settlement, replay protection, entitlements, and explicit pilot consent exist.
 
 ## Constraints that must not be violated
 
