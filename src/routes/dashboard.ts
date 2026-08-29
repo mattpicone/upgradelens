@@ -4,9 +4,47 @@
 // UpgradeLens MCP tools after conservative verifier/test exclusions.
 
 import { Hono } from "hono";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import type { AppVariables } from "../context";
 import { paymentActivation } from "../billing";
+
+// Browser sign-in support: the owner pastes the token once and a scoped,
+// HttpOnly cookie keeps that device signed in. The token never appears in a
+// URL, and API/script access via Authorization: Bearer is unchanged.
+const OWNER_COOKIE = "ul_owner";
+const OWNER_COOKIE_MAX_AGE_S = 90 * 24 * 3600;
+
+function loginPage(status: 200 | 401, message?: string) {
+  return [
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>UpgradeLens — owner sign-in</title>
+<style>
+body{margin:0;font:16px/1.5 ui-sans-serif,system-ui;background:#0b0e14;color:#e6e9f0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+form{background:#131826;border-radius:12px;padding:28px;max-width:360px;width:100%}
+h1{font-size:1.2rem;margin:0 0 4px}p{color:#8b93a7;font-size:.85rem;margin:0 0 16px}
+input{width:100%;box-sizing:border-box;background:#0b0e14;color:#e6e9f0;border:1px solid #232a3d;border-radius:8px;padding:12px;font-size:1rem;margin-bottom:12px}
+button{width:100%;background:#5eead4;color:#0b0e14;border:0;border-radius:8px;padding:12px;font-size:1rem;font-weight:700}
+.err{color:#f87171;font-size:.85rem;margin:0 0 12px}
+</style></head><body>
+<form method="post" action="/dashboard/login">
+<h1>UpgradeLens owner dashboard</h1>
+<p>Paste the owner token once. This device stays signed in for 90 days.</p>
+${message ? `<p class="err">${message}</p>` : ""}
+<input type="password" name="token" placeholder="Owner token" autocomplete="current-password" autofocus required>
+<button type="submit">Sign in</button>
+</form></body></html>`,
+    status,
+  ] as const;
+}
+
+function securityHeaders(c: { header: (name: string, value: string) => void }) {
+  c.header("cache-control", "no-store, max-age=0");
+  c.header("pragma", "no-cache");
+  c.header("referrer-policy", "no-referrer");
+  c.header("x-robots-tag", "noindex, nofollow");
+}
 
 export const dashboard = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -605,19 +643,47 @@ export function businessState(s: Stats): { state: string; why: string } {
   };
 }
 
+dashboard.post("/login", async (c) => {
+  securityHeaders(c);
+  if (!c.env.OWNER_TOKEN) {
+    return c.text("Dashboard unavailable: OWNER_TOKEN secret is not configured.", 503);
+  }
+  const body = await c.req.parseBody();
+  const submitted = typeof body.token === "string" ? body.token.trim() : "";
+  if (submitted !== c.env.OWNER_TOKEN) {
+    const [html, status] = loginPage(401, "That token didn't match. Try again.");
+    return c.html(html, status);
+  }
+  setCookie(c, OWNER_COOKIE, submitted, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Strict",
+    path: "/dashboard",
+    maxAge: OWNER_COOKIE_MAX_AGE_S,
+  });
+  return c.redirect("/dashboard", 303);
+});
+
+dashboard.post("/logout", (c) => {
+  securityHeaders(c);
+  deleteCookie(c, OWNER_COOKIE, { path: "/dashboard" });
+  return c.redirect("/dashboard", 303);
+});
+
 dashboard.get("/", async (c) => {
-  c.header("cache-control", "no-store, max-age=0");
-  c.header("pragma", "no-cache");
-  c.header("referrer-policy", "no-referrer");
-  c.header("x-robots-tag", "noindex, nofollow");
+  securityHeaders(c);
   const auth = c.req.header("authorization") ?? "";
   const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
-  const token = bearer;
+  const token = bearer || getCookie(c, OWNER_COOKIE) || "";
   if (!c.env.OWNER_TOKEN) {
     return c.text("Dashboard unavailable: OWNER_TOKEN secret is not configured.", 503);
   }
   if (token !== c.env.OWNER_TOKEN) {
-    return c.text("Unauthorized. Send OWNER_TOKEN as an Authorization: Bearer header.", 401);
+    if (c.req.query("format") === "json") {
+      return c.text("Unauthorized. Send OWNER_TOKEN as an Authorization: Bearer header.", 401);
+    }
+    const [html, status] = loginPage(401);
+    return c.html(html, status);
   }
 
   const s = await collectStats(c.env);
@@ -793,5 +859,6 @@ Strong signal requires ≥1,000 successful calls/30d, ≥20 stable keyed repeat 
 
 <h2>System</h2>
 <p class="muted">Version ${c.env.SERVICE_VERSION} · analysis v${c.env.ANALYSIS_VERSION} · generated ${new Date().toISOString()}</p>
+<form method="post" action="/dashboard/logout"><button style="background:none;border:1px solid #232a3d;color:#8b93a7;border-radius:8px;padding:8px 16px;font:inherit;font-size:.85rem">Sign out on this device</button></form>
 </body></html>`);
 });

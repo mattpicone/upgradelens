@@ -198,6 +198,72 @@ describe("dashboard auth", () => {
     const res = await app.request("/dashboard?token=test-owner-token", {}, env, fakeCtx);
     expect(res.status).toBe(401);
   });
+  it("serves a browser sign-in form when logged out", async () => {
+    const res = await app.request("/dashboard", {}, env, fakeCtx);
+    expect(res.status).toBe(401);
+    const html = await res.text();
+    expect(html).toMatch(/action="\/dashboard\/login"/);
+    expect(html).toMatch(/type="password"/);
+    expect(res.headers.get("x-robots-tag")).toMatch(/noindex/);
+  });
+  it("signs in with a one-time token paste and a scoped HttpOnly cookie", async () => {
+    const login = await app.request(
+      "/dashboard/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "token=test-owner-token",
+      },
+      env,
+      fakeCtx,
+    );
+    expect(login.status).toBe(303);
+    const cookie = login.headers.get("set-cookie") ?? "";
+    expect(cookie).toMatch(/ul_owner=/);
+    expect(cookie).toMatch(/HttpOnly/i);
+    expect(cookie).toMatch(/Secure/i);
+    expect(cookie).toMatch(/Path=\/dashboard/i);
+
+    const res = await app.request(
+      "/dashboard",
+      { headers: { cookie: "ul_owner=test-owner-token" } },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toMatch(/owner dashboard/);
+  });
+  it("rejects a wrong token at sign-in and clears the session on logout", async () => {
+    const bad = await app.request(
+      "/dashboard/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "token=wrong",
+      },
+      env,
+      fakeCtx,
+    );
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get("set-cookie")).toBeNull();
+
+    const logout = await app.request(
+      "/dashboard/logout",
+      { method: "POST", headers: { cookie: "ul_owner=test-owner-token" } },
+      env,
+      fakeCtx,
+    );
+    expect(logout.status).toBe(303);
+    expect(logout.headers.get("set-cookie")).toMatch(/ul_owner=;|Max-Age=0/i);
+
+    const wrongCookie = await app.request(
+      "/dashboard",
+      { headers: { cookie: "ul_owner=wrong" } },
+      env,
+      fakeCtx,
+    );
+    expect(wrongCookie.status).toBe(401);
+  });
 });
 
 describe("key issuance", () => {
