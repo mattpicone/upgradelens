@@ -34,7 +34,7 @@ namespace_id = "11002"
 
 [vars]
 ANALYSIS_VERSION = "2"
-SERVICE_VERSION = "0.2.0"
+SERVICE_VERSION = "0.2.1"
 PAYMENTS_ENABLED = "false"
 PUBLIC_BASE_URL = "https://upgradelens.mattpicone.workers.dev"
 ALLOWED_ORIGINS = "https://upgradelens.mattpicone.workers.dev"

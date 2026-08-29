@@ -13,7 +13,7 @@ and exactly what remains.
 | Surface | Status | Notes |
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens with MCP topics for GitHub search discovery |
-| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published as `io.github.mattpicone/upgradelens`; the v0.2.0 manifest adds agent-safe action gating, output schemas and read-only/idempotent annotations. Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
+| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published as `io.github.mattpicone/upgradelens`; the v0.2.x manifest adds agent-safe action gating, output schemas and read-only/idempotent annotations. Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
 | llms.txt + OpenAPI + pricing.json | DONE | Live at https://upgradelens.mattpicone.workers.dev (`/llms.txt`, `/openapi.json`, `/pricing.json`) |
 | PulseMCP | READY | Auto-indexes the official registry; no separate submission needed once registry entry exists. Manual add form: https://www.pulsemcp.com/submit if indexing lags |
 | Glama MCP directory | READY | Indexes official registry + GitHub topics (`mcp-server` topic set). Manual claim possible at https://glama.ai/mcp/servers after registry publish |

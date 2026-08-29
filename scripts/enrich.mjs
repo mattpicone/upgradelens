@@ -8,6 +8,8 @@
 // Release-note text is treated as untrusted data: we extract short factual
 // lines and never execute or interpret it.
 
+import { extractBreaking, versionFromTag } from "./release-note-extract.mjs";
+
 const SERVICE_URL = process.env.SERVICE_URL;
 const ADMIN_KEY = process.env.ADMIN_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -43,49 +45,6 @@ const TARGETS = [
   { ecosystem: "pypi", package: "celery", repo: "celery/celery" },
 ];
 
-const BREAKING_HEADING = /^#+\s*.*(breaking|incompatible|removed|migration)/i;
-const BREAKING_INLINE = /\bBREAKING(\s+CHANGE)?S?\b[:\s]/i;
-
-function versionFromTag(tag) {
-  const m = /v?(\d+[.\w!+-]*)/.exec(tag);
-  return m ? m[1] : null;
-}
-
-// Deterministic extraction: bullets under breaking headings + explicit
-// "BREAKING CHANGE:" lines. Short facts only — never full documents.
-function extractBreaking(body) {
-  const facts = [];
-  const lines = (body ?? "").split(/\r?\n/).slice(0, 800);
-  let inBreakingSection = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^#+\s/.test(trimmed)) {
-      inBreakingSection = BREAKING_HEADING.test(trimmed);
-      continue;
-    }
-    const isBullet = /^[-*+]\s+/.test(trimmed);
-    if (inBreakingSection && isBullet) {
-      facts.push({ text: trimmed.replace(/^[-*+]\s+/, ""), confidence: 0.9, severity: "unknown" });
-    } else if (BREAKING_INLINE.test(trimmed) && trimmed.length < 400) {
-      facts.push({ text: trimmed, confidence: 0.85, severity: "high" });
-    }
-    if (facts.length >= 10) break;
-  }
-  // strip markdown links/images down to their text; drop html
-  return facts
-    .map((f) => ({
-      ...f,
-      text: f.text
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-        .replace(/<[^>]+>/g, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 280),
-    }))
-    .filter((f) => f.text.length > 12);
-}
-
 async function gh(path) {
   const res = await fetch(`https://api.github.com${path}`, {
     headers: {
@@ -98,13 +57,14 @@ async function gh(path) {
   return res.json();
 }
 
-const rows = [];
+let totalFacts = 0;
 for (const t of TARGETS) {
   const releases = await gh(`/repos/${t.repo}/releases?per_page=30`);
   if (!Array.isArray(releases)) {
     console.warn(`skip ${t.repo}: releases unavailable`);
     continue;
   }
+  const rows = [];
   for (const rel of releases) {
     const version = versionFromTag(rel.tag_name ?? "");
     if (!version || rel.draft) continue;
@@ -120,12 +80,8 @@ for (const t of TARGETS) {
       });
     }
   }
-  console.log(`${t.repo}: cumulative facts=${rows.length}`);
-}
-
-console.log(`Extracted ${rows.length} breaking-change facts. Ingesting...`);
-for (let i = 0; i < rows.length; i += 200) {
-  const chunk = rows.slice(i, i + 200);
+  totalFacts += rows.length;
+  console.log(`${t.repo}: facts=${rows.length}`);
   const res = await fetch(`${SERVICE_URL}/admin/breaking-changes`, {
     method: "POST",
     headers: {
@@ -133,11 +89,18 @@ for (let i = 0; i < rows.length; i += 200) {
       "x-admin-key": ADMIN_KEY,
       "user-agent": "upgradelens-ci",
     },
-    body: JSON.stringify({ rows: chunk }),
+    body: JSON.stringify({
+      replace: true,
+      ecosystem: t.ecosystem,
+      package: t.package,
+      rows,
+    }),
   });
-  console.log(`chunk ${i / 200}: ${res.status} ${await res.text()}`);
+  console.log(`replace ${t.ecosystem}:${t.package}: ${res.status} ${await res.text()}`);
   if (!res.ok) process.exit(1);
 }
+
+console.log(`Extracted and ingested ${totalFacts} breaking-change facts.`);
 
 // mark enrichment freshness
 await fetch(`${SERVICE_URL}/admin/refresh-source-snapshot`, {

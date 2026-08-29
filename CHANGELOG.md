@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-08-29
+
+Release-note evidence precision fix.
+
+- Made breaking-change extraction conservative: only explicit breaking/incompatibility sections and conventional `BREAKING CHANGE:` markers produce facts.
+- Suppressed negated, reverted and reference-only mentions so release notes cannot create false breaking-change claims from narrative prose.
+- Replaced each curated package's enrichment snapshot atomically, removing stale facts that the stricter extractor no longer accepts.
+- Added focused extraction regression tests.
+
 ## 0.2.0 — 2026-08-28
 
 Correctness and free-tier hardening release.
