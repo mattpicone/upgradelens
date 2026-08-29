@@ -10,17 +10,35 @@ a read-only dependency-upgrade intelligence API + remote MCP server whose goal
 is **genuine external AI-agent usage**, measured objectively, with monetization
 prepared but inactive until demand thresholds are met.
 
+## Live production (2026-08-29)
+
+- **Public URL:** `https://upgradelens.mattpicone.workers.dev`
+- **MCP:** `https://upgradelens.mattpicone.workers.dev/mcp`
+- **`/healthz`:** `db=ok`, `telemetry_schema=ok`
+- **`counts_reset_at`:** `2026-08-29T19:57:23.228Z` — do not reset again
+- **Business:** WAITING FOR FIRST ORGANIC TOOL CALL; genuine business counters are 0
+- **Owner dashboard:** open `/dashboard` in a browser and paste `OWNER_TOKEN` once.
+  A scoped HttpOnly cookie (`ul_owner`, path `/dashboard`, 90 days) keeps that
+  device signed in. The token is never placed in the URL. Scripts still use
+  `Authorization: Bearer`.
+- **CI deploy:** skipped. GitHub repository secret `CLOUDFLARE_API_TOKEN` is not
+  configured, so `.github/workflows/ci.yml` runs tests on every push but does
+  not deploy. Add a Workers Scripts:Edit + D1:Edit token to enable CI deploys.
+- **Directories:** PulseMCP submit form is closed (0 search hits). Glama servers
+  page 404; connector listing exists at
+  https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens. cursor.directory
+  has no free public add form. See `docs/DISTRIBUTION.md`.
+
 ## Topology
 
 - **Runtime:** Cloudflare Worker (free plan), TypeScript + Hono. Entry: `src/index.ts`.
 - **Storage:** Cloudflare D1 (SQLite), schema in `migrations/0001_init.sql`.
   KV is deliberately unused (free tier allows only 1k writes/day).
-- **Public URL:** `https://upgradelens.<account>.workers.dev` (see `wrangler.toml`).
 - **MCP:** stateless streamable HTTP at `/mcp` (`src/mcp/server.ts`).
 - **Cron (Worker):** every 6h — bounded counter/telemetry cleanup + oldest-stale cache refresh.
 - **GitHub Actions:**
   - `ci.yml` — typecheck + tests on every push; deploy on main (needs `CLOUDFLARE_API_TOKEN` secret).
-    The selection corpus scorer is a required CI check.
+    The selection corpus scorer is a required CI check. Today that secret is missing, so deploy is skipped.
   - `enrich.yml` — Mon/Thu: deterministic breaking-change extraction from GitHub releases → `/admin/breaking-changes` (needs `ADMIN_KEY` secret + `SERVICE_URL` variable).
   - `health.yml` — every 30 min: probes `/healthz`, opens one deduplicated GitHub issue on failure.
   - After a successful deploy, `ci.yml` runs `npm run verify:production:mcp` when the optional `OWNER_TOKEN` repository secret is configured. The smoke test is gated on `telemetry_schema=ok`, exercises `initialize`, `tools/list`, and all three `tools/call` tools, then reads the owner dashboard; every request is owner-tagged and excluded from business metrics.
@@ -31,8 +49,9 @@ prepared but inactive until demand thresholds are met.
 |---|---|---|
 | Worker (wrangler secret) | `OWNER_TOKEN` | dashboard auth + marks owner traffic internal |
 | Worker (wrangler secret) | `ADMIN_KEY` | CI enrichment ingestion |
-| GitHub repo secret | `CLOUDFLARE_API_TOKEN` | CI deploys |
+| GitHub repo secret | `CLOUDFLARE_API_TOKEN` | CI deploys — **not configured; deploy skipped** |
 | GitHub repo secret | `ADMIN_KEY` | same value as worker ADMIN_KEY |
+| GitHub repo secret | `OWNER_TOKEN` | configured; post-deploy owner-tagged MCP verify (still unused until CI can deploy) |
 | GitHub repo variable | `SERVICE_URL` | public base URL |
 
 Never log or commit these.
@@ -55,12 +74,13 @@ Never log or commit these.
 
 ## Routine operations
 
-- Deploy: push to `main` (CI) or `npx wrangler deploy`.
+- Deploy: push to `main` (CI, once `CLOUDFLARE_API_TOKEN` is set) or `npx wrangler deploy`.
 - Rollback: `npx wrangler rollback`.
 - Logs: `npx wrangler tail upgradelens`.
 - DB schema change: append a new file to `migrations/`, apply with `wrangler d1 execute upgradelens --remote --file=...`. Apply `0002_hardening.sql` to existing deployments with `npm run db:harden:remote`.
-- Owner dashboard JSON: `curl --oauth2-bearer "<OWNER_TOKEN>" '<SERVICE_URL>/dashboard?format=json'`.
-- Dashboard reset: `npm run db:dashboard-reset:remote` establishes the one-time `dashboard_state.counts_reset_at` baseline. It is idempotent and does not delete telemetry; all dashboard counts and financial aggregates exclude rows before that timestamp. The dashboard JSON/HTML displays the exact reset time.
+- Owner dashboard (browser): `https://upgradelens.mattpicone.workers.dev/dashboard` — cookie login.
+- Owner dashboard JSON: `curl --oauth2-bearer "<OWNER_TOKEN>" 'https://upgradelens.mattpicone.workers.dev/dashboard?format=json'`.
+- Dashboard reset: already applied (`counts_reset_at=2026-08-29T19:57:23.228Z`). Do not run `npm run db:dashboard-reset:remote` again. The command is idempotent and does not delete telemetry; all dashboard counts and financial aggregates exclude rows before that timestamp.
 
 ## Free-tier budget notes
 
@@ -75,4 +95,4 @@ Never log or commit these.
 
 ## Distribution state
 
-See `docs/DISTRIBUTION.md` for registry/directory listing status and remaining human-gated submissions.
+See `docs/DISTRIBUTION.md` for registry/directory listing status and remaining human-gated submissions. PulseMCP and Glama are not indexed; Cursor is docs-only.

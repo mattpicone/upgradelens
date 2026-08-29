@@ -17,7 +17,8 @@ import type { AppVariables } from "../context";
 import { readJsonBody } from "../http/body";
 import { checkRateLimit } from "../telemetry";
 
-const SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+export const MCP_SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
+const SUPPORTED_PROTOCOLS: readonly string[] = MCP_SUPPORTED_PROTOCOLS;
 const LATEST_PROTOCOL = "2025-06-18";
 
 const CHECK_INPUT_SCHEMA = {
@@ -75,6 +76,67 @@ const COVERAGE_SCHEMA = {
   ),
 } as const;
 
+const VERSION_FACTS_SCHEMA = {
+  type: "object",
+  description: "Publication, yank, deprecation, and version-distance facts the engine already returns.",
+  properties: {
+    current_published_at: { type: ["string", "null"] },
+    target_published_at: { type: ["string", "null"] },
+    current_yanked: { type: "boolean" },
+    target_yanked: { type: "boolean" },
+    package_deprecated: { type: "boolean" },
+    target_deprecation_message: { type: ["string", "null"] },
+    is_downgrade: { type: "boolean" },
+    semver_jump: {
+      type: "string",
+      enum: ["major", "minor", "patch", "prerelease", "none", "unknown"],
+    },
+    versions_between: { type: ["integer", "null"] },
+  },
+} as const;
+
+const SECURITY_DELTA_SCHEMA = {
+  type: "object",
+  description: "OSV advisory sets affecting current, fixed by target, and still affecting target.",
+  properties: {
+    advisories_affecting_current: { type: "array", items: { type: "object" } },
+    advisories_fixed_by_target: { type: "array", items: { type: "object" } },
+    advisories_affecting_target: { type: "array", items: { type: "object" } },
+  },
+} as const;
+
+const COMPATIBILITY_SCHEMA = {
+  type: "object",
+  description: "Runtime engines, direct-dependency diff, and license change between the two versions.",
+  properties: {
+    runtime_supported: { type: ["boolean", "null"] },
+    runtime_notes: { type: "array", items: { type: "string" } },
+    dependency_changes: {
+      type: ["object", "null"],
+      properties: {
+        added: { type: "array", items: { type: "string" } },
+        removed: { type: "array", items: { type: "string" } },
+        changed: { type: "array", items: { type: "object" } },
+      },
+    },
+    license_change: { type: ["object", "null"] },
+  },
+} as const;
+
+const BREAKING_CHANGES_SCHEMA = {
+  type: "array",
+  description: "Documented breaking-change excerpts extracted from official release notes.",
+  items: {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      severity: { type: "string" },
+      confidence: { type: "number" },
+      source_url: { type: "string" },
+    },
+  },
+} as const;
+
 const CHECK_OUTPUT_SCHEMA = {
   type: "object",
   required: [
@@ -90,6 +152,12 @@ const CHECK_OUTPUT_SCHEMA = {
     package: { type: "string" },
     current_version: { type: "string" },
     target_version: { type: "string" },
+    latest_stable: { type: ["string", "null"] },
+    repository_url: { type: ["string", "null"] },
+    version_facts: VERSION_FACTS_SCHEMA,
+    security_delta: SECURITY_DELTA_SCHEMA,
+    compatibility: COMPATIBILITY_SCHEMA,
+    breaking_changes: BREAKING_CHANGES_SCHEMA,
     reasons: { type: "array", items: { type: "string" } },
     claim_evidence: { type: "array", items: { type: "object" } },
     evidence: { type: "array", items: { type: "object" } },
@@ -97,6 +165,7 @@ const CHECK_OUTPUT_SCHEMA = {
     confidence: { type: "number", minimum: 0, maximum: 1 },
     freshness: { type: "string" },
     analysis_version: { type: "string" },
+    cache_hit: { type: "boolean" },
   },
   additionalProperties: true,
 } as const;
@@ -113,28 +182,33 @@ export const MCP_TOOLS = [
     name: "check_dependency_upgrade",
     title: "Assess a known dependency upgrade target (go/no-go)",
     description:
-      "Use when evaluating an existing dependency from one exact installed version to one exact target version and the caller needs a go/no-go risk decision before editing. Returns decision/action_allowed plus source-cited vulnerability delta, registry-declared Node/Python compatibility, direct-dependency changes, EOL, and documented breaking-change evidence for npm or PyPI. Use plan_dependency_upgrade instead when migration, refactor, changelog, or test steps are requested. Do not use to choose a target, install a new package, inspect only one version, answer general documentation questions, or analyze another ecosystem. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
+      "Use when asked for a go/no-go risk decision, cited assessment, or whether an existing npm or PyPI dependency can move from one exact installed version to one exact target version before editing. Returns decision/action_allowed plus source-cited vulnerability delta, registry-declared Node/Python compatibility, direct-dependency changes, EOL, and documented breaking-change evidence. Use plan_dependency_upgrade instead when migration, refactor, changelog, or test steps are requested. Do not use to choose a target, install a new package, inspect only one version, answer general documentation questions, or analyze another ecosystem. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
     inputSchema: CHECK_INPUT_SCHEMA,
     outputSchema: CHECK_OUTPUT_SCHEMA,
     annotations: READ_ONLY_ANNOTATIONS,
   },
   {
     name: "find_safe_upgrade_target",
-    title: "Rank candidate upgrade targets (target unknown; full check required)",
+    title: "Rank upgrade candidates (not a safety verdict; full check required)",
     description:
-      "Use only when an existing npm or PyPI dependency has an exact current version but no target version has been chosen. Ranks candidates using version distance and OSV advisory deltas; candidates are not declared safe. Every candidate requires either check_dependency_upgrade for a decision or plan_dependency_upgrade when migration steps are requested; the plan tool already includes the full check. This tool does not evaluate repository code or caller runtime compatibility. Do not use when a target is stated, for a new installation or simple latest-version lookup, or as authorization to modify files. Read-only and safe to retry; unavailable evidence is returned explicitly.",
+      "Use only when asked which version to evaluate, rank, or recommend and an existing npm or PyPI dependency has an exact current version but no target yet. Ranks candidates using version distance and OSV advisory deltas; candidates are not declared safe. Every candidate requires either check_dependency_upgrade for a decision or plan_dependency_upgrade when migration steps are requested; the plan tool already includes the full check. This tool does not evaluate repository code or caller runtime compatibility. Do not use when a target is stated, for a new installation or simple latest-version lookup, or as authorization to modify files. Read-only and safe to retry; unavailable evidence is returned explicitly.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["ecosystem", "package", "current_version"],
       properties: {
-        ecosystem: { type: "string", enum: ["npm", "pypi"] },
+        ecosystem: {
+          type: "string",
+          enum: ["npm", "pypi"],
+          description: "Package ecosystem. Only npm and pypi are supported.",
+        },
         package: { type: "string", description: "Exact registry package name." },
         current_version: { type: "string", description: "Version currently in use." },
         max_major_jump: {
           type: "integer",
           minimum: 0,
-          description: "Optional cap on how many major versions a candidate may jump.",
+          description:
+            "Optional cap on how many major versions a candidate may jump. 0 = stay in the same major.",
         },
         allow_prerelease: { type: "boolean", description: "Include prerelease candidates." },
       },
@@ -146,6 +220,7 @@ export const MCP_TOOLS = [
         ecosystem: { type: "string", enum: ["npm", "pypi"] },
         package: { type: "string" },
         current_version: { type: "string" },
+        latest_stable: { type: ["string", "null"] },
         candidates: {
           type: "array",
           items: {
@@ -156,9 +231,18 @@ export const MCP_TOOLS = [
               decision: { type: "string", enum: ["review_required", "block", "unknown"] },
               requires_full_check: { const: true },
               rationale: { type: "array", items: { type: "string" } },
+              score: {
+                type: "number",
+                description: "Ranking score from version distance and advisory deltas; not a safety verdict.",
+              },
+              fixes_advisories: { type: "array", items: { type: "string" } },
+              introduces_advisories: { type: "array", items: { type: "string" } },
+              semver_jump: { type: "string" },
+              published_at: { type: ["string", "null"] },
             },
           },
         },
+        evidence: { type: "array", items: { type: "object" } },
         coverage: { type: "object" },
         confidence: { type: "number" },
         freshness: { type: "string" },
@@ -172,7 +256,7 @@ export const MCP_TOOLS = [
     name: "plan_dependency_upgrade",
     title: "Plan a known dependency upgrade (migration/review checklist)",
     description:
-      "Use when both exact current and target versions are known and the caller asks for a migration checklist, refactor actions, ordered review actions, changelog links, or test steps for that upgrade. Returns the complete upgrade check plus source-linked migration_actions and changelog_urls; actions remain gated by action_allowed. Supports npm and PyPI only. Use check_dependency_upgrade instead for a go/no-go risk decision without steps. Do not use to choose a target, install a package, provide general tutorials, or modify files. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
+      "Use when asked for a migration checklist, refactor actions, ordered review actions, changelog links, or test steps and both exact current and target versions are known. Returns the complete upgrade check plus source-linked migration_actions and changelog_urls; actions remain gated by action_allowed. Supports npm and PyPI only. Use check_dependency_upgrade instead for a go/no-go risk decision without steps. Do not use to choose a target, install a package, provide general tutorials, or modify files. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
     inputSchema: CHECK_INPUT_SCHEMA,
     outputSchema: {
       ...CHECK_OUTPUT_SCHEMA,
@@ -281,7 +365,7 @@ async function handleMessage(
           version: env.SERVICE_VERSION,
         },
         instructions:
-          "UpgradeLens answers npm and PyPI upgrade questions with deterministic, source-cited evidence. Call check_dependency_upgrade before editing when both versions are known; use find_safe_upgrade_target only to discover candidates; use plan_dependency_upgrade for review steps. Edit dependency files only when action_allowed=true. unknown means required evidence or caller context is insufficient.",
+          "UpgradeLens answers npm and PyPI upgrade questions with deterministic, source-cited evidence. Call check_dependency_upgrade before editing when both versions are known; use find_safe_upgrade_target only to discover candidates; use plan_dependency_upgrade for review steps. If current_version is unknown, read the project manifest first; if the target is unknown, call find_safe_upgrade_target then check_dependency_upgrade or plan_dependency_upgrade. Edit dependency files only when action_allowed=true. unknown means required evidence or caller context is insufficient.",
       });
     }
     case "ping":

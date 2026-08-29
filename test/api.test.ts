@@ -114,11 +114,19 @@ describe("meta surfaces", () => {
     );
   });
 
-  it("serves llms.txt mentioning the MCP endpoint", async () => {
+  it("serves llms.txt as a selection document with when/do-not-use and examples", async () => {
     const res = await app.request("/llms.txt", {}, env, fakeCtx);
     const text = await res.text();
     expect(text).toMatch(/\/mcp/);
     expect(text).toMatch(/check_dependency_upgrade/);
+    expect(text).toMatch(/find_safe_upgrade_target/);
+    expect(text).toMatch(/plan_dependency_upgrade/);
+    expect(text).toMatch(/Use when/);
+    expect(text).toMatch(/Do not use when/);
+    expect(text).toMatch(/"ecosystem":"npm"/);
+    expect(text).toMatch(/"ecosystem":"pypi"/);
+    expect(text).toMatch(/max_major_jump/);
+    expect(text).toMatch(/read the project manifest first/);
   });
 
   it("serves pricing.json in free_validation mode with $0 posture", async () => {
@@ -136,12 +144,24 @@ describe("meta surfaces", () => {
     expect(["ok", "degraded"]).toContain(body.status);
     expect(body.service).toBe("upgradelens");
     expect(["ok", "missing_or_outdated"]).toContain(body.telemetry_schema);
+    expect(res.headers.get("cache-control")).toMatch(/no-store/);
   });
 
-  it("landing page is served with MCP config snippet", async () => {
+  it("landing page leads with install snippets and the official Cursor link", async () => {
     const res = await app.request("/", {}, env, fakeCtx);
     const html = await res.text();
     expect(html).toMatch(/mcpServers/);
+    expect(html).toMatch(/claude mcp add --transport http upgradelens/);
+    expect(html).toMatch(/\[mcp_servers\.upgradelens\]/);
+    expect(html).toMatch(/cursor\.com\/install-mcp\?name=upgradelens/);
+    expect(html).toMatch(/Anonymous free evaluation quota/);
+    expect(html).toMatch(/no API key required/);
+    expect(html).toMatch(/Read-only/);
+    expect(html).toMatch(/npm and PyPI only/);
+    const installAt = html.indexOf("<h2>Install</h2>");
+    const restAt = html.indexOf("REST API");
+    expect(installAt).toBeGreaterThan(0);
+    expect(installAt).toBeLessThan(restAt);
   });
 });
 

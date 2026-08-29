@@ -32,6 +32,9 @@ describe("MCP protocol", () => {
     expect(body.result.protocolVersion).toBe("2025-03-26");
     expect(body.result.serverInfo.name).toBe("upgradelens");
     expect(body.result.capabilities.tools).toBeDefined();
+    expect(body.result.instructions).toMatch(/If current_version is unknown, read the project manifest first/);
+    expect(body.result.instructions).toMatch(/if the target is unknown, call find_safe_upgrade_target then check_dependency_upgrade or plan_dependency_upgrade/);
+    expect(body.result.instructions).toMatch(/action_allowed=true/);
   });
 
   it("falls back to latest supported protocol for unknown versions", async () => {
@@ -79,7 +82,17 @@ describe("MCP protocol", () => {
     expect(check.description).toMatch(/go\/no-go.*without steps|go\/no-go risk decision/s);
     expect(check.description).toMatch(/Use plan_dependency_upgrade instead/);
     expect(find.title).not.toMatch(/Find a safe/i);
+    expect(find.title).toMatch(/not a safety verdict/i);
     expect(find.description).toMatch(/candidates are not declared safe/i);
+    expect(find.inputSchema.properties.ecosystem.description).toMatch(/npm and pypi/i);
+    expect(find.inputSchema.properties.max_major_jump.description).toMatch(/0 = stay in the same major/);
+    expect(check.outputSchema.properties.version_facts).toBeDefined();
+    expect(check.outputSchema.properties.security_delta).toBeDefined();
+    expect(check.outputSchema.properties.compatibility).toBeDefined();
+    expect(check.outputSchema.properties.breaking_changes).toBeDefined();
+    expect(find.outputSchema.properties.candidates.items.properties.score).toBeDefined();
+    expect(find.outputSchema.properties.candidates.items.properties.fixes_advisories).toBeDefined();
+    expect(find.outputSchema.properties.candidates.items.properties.introduces_advisories).toBeDefined();
     expect(plan.description).toMatch(/migration checklist.*refactor actions.*ordered review actions/s);
     expect(plan.description).toMatch(/Use check_dependency_upgrade instead/);
     expect(check.inputSchema.properties.runtime.additionalProperties).toBe(false);

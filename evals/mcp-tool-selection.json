@@ -21,7 +21,7 @@
 
     { "id": "F1", "prompt": "We use npm express 4.18.2. Which target should we evaluate?", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
     { "id": "F2", "prompt": "Our PyPI django is 3.2.25; target is undecided.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
-    { "id": "F3", "prompt": "Find TypeScript candidates above 5.4.5 but remain in major 5.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
+    { "id": "F3", "prompt": "Find TypeScript candidates above 5.4.5 but remain in major 5 (max_major_jump 0 = stay in the same major).", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
     { "id": "F4", "prompt": "Rank numpy targets from 1.26.4 and include prereleases.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target"] },
     { "id": "F5", "prompt": "Move lodash 4.17.20 to a version that addresses known advisories; target unknown.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target", "check_dependency_upgrade"] },
     { "id": "F6", "prompt": "Django 4.2.11 needs an upgrade; recommend a target and migration steps.", "first_action": "find_safe_upgrade_target", "sequence": ["find_safe_upgrade_target", "plan_dependency_upgrade"] },
@@ -43,7 +43,7 @@
     { "id": "N8", "prompt": "Run npm audit fix and edit package-lock.json.", "first_action": "none", "sequence": [] },
     { "id": "N9", "prompt": "Update every dependency in package.json.", "first_action": "none", "sequence": [] },
     { "id": "N10", "prompt": "Show the Django 5.1 changelog.", "first_action": "none", "sequence": [] },
-    { "id": "N11", "prompt": "Can we move Express 4 to 5, and what changes?", "first_action": "none", "sequence": [] },
+    { "id": "N11", "prompt": "Can we move Express 4 to 5, and what changes? The current_version is unknown until the manifest is read.", "first_action": "none", "sequence": [] },
     { "id": "N12", "prompt": "I chose React 19.0.0. Is it safe?", "first_action": "none", "sequence": [] }
   ],
   "acceptance": {

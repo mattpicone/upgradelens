@@ -1,11 +1,124 @@
-// Machine documentation surfaces: OpenAPI, llms.txt, pricing.json, healthz, landing.
+// Machine documentation surfaces: OpenAPI, llms.txt, pricing.json, healthz, landing,
+// plus Worker-hosted MCP discovery documents for crawlers that hit the live host.
 
 import { Hono } from "hono";
 import type { Env } from "../types";
 import { PRICING, paymentActivation } from "../billing";
 import type { AppVariables } from "../context";
+import { MCP_SUPPORTED_PROTOCOLS, MCP_TOOLS } from "../mcp/server";
 
 export const meta = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+const STATIC_DOC_CACHE = "public, max-age=3600";
+const LIVE_MCP_PATH = "/mcp";
+const SERVER_CARD_PATH = "/.well-known/mcp/server-card.json";
+const AGENT_PLUGINS_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
+const MCP_SERVER_JSON_SCHEMA =
+  "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json";
+const MCP_SERVER_CARD_SCHEMA =
+  "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json";
+
+function mcpEndpoint(base: string): string {
+  return `${base}${LIVE_MCP_PATH}`;
+}
+
+function cursorInstallHref(base: string): string {
+  const config = btoa(JSON.stringify({ url: mcpEndpoint(base) }));
+  return `https://cursor.com/install-mcp?name=upgradelens&config=${encodeURIComponent(config)}`;
+}
+
+function cachedJson(
+  c: { header: (name: string, value: string) => void; json: (body: unknown) => Response },
+  body: unknown,
+) {
+  c.header("cache-control", STATIC_DOC_CACHE);
+  return c.json(body);
+}
+
+function agentPluginsMcp(env: Env) {
+  return {
+    $schema: AGENT_PLUGINS_MCP_SCHEMA,
+    mcpServers: {
+      upgradelens: {
+        type: "streamable-http",
+        url: mcpEndpoint(env.PUBLIC_BASE_URL),
+      },
+    },
+  };
+}
+
+function registryServerJson(env: Env) {
+  const base = env.PUBLIC_BASE_URL;
+  return {
+    $schema: MCP_SERVER_JSON_SCHEMA,
+    name: "io.github.mattpicone/upgradelens",
+    title: "UpgradeLens",
+    description:
+      "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
+    version: env.SERVICE_VERSION,
+    websiteUrl: base,
+    repository: {
+      url: "https://github.com/mattpicone/upgradelens",
+      source: "github",
+    },
+    remotes: [
+      {
+        type: "streamable-http",
+        url: mcpEndpoint(base),
+      },
+    ],
+  };
+}
+
+function experimentalServerCard(env: Env) {
+  const base = env.PUBLIC_BASE_URL;
+  return {
+    $schema: MCP_SERVER_CARD_SCHEMA,
+    name: "io.github.mattpicone/upgradelens",
+    version: env.SERVICE_VERSION,
+    title: "UpgradeLens",
+    description:
+      "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
+    websiteUrl: base,
+    repository: {
+      url: "https://github.com/mattpicone/upgradelens",
+      source: "github",
+    },
+    remotes: [
+      {
+        type: "streamable-http" as const,
+        url: mcpEndpoint(base),
+        supportedProtocolVersions: [...MCP_SUPPORTED_PROTOCOLS],
+      },
+    ],
+    // SEP-2127 cards do not enumerate primitives at the top level. Tool names,
+    // readOnlyHint, and ecosystem limits are advisory vendor metadata only.
+    _meta: {
+      "io.github.mattpicone/upgradelens": {
+        experimental: true,
+        extension: "experimental-ext-server-card",
+        ratified: false,
+        note:
+          "Experimental SEP-2127 Server Card. Not a ratified MCP specification. Runtime tools/list is authoritative.",
+        ecosystems: ["npm", "pypi"],
+        tools: MCP_TOOLS.map((tool) => ({
+          name: tool.name,
+          annotations: { readOnlyHint: true },
+        })),
+      },
+    },
+  };
+}
+
+function wellKnownMcpAlias(env: Env) {
+  const base = env.PUBLIC_BASE_URL;
+  return {
+    name: "upgradelens",
+    transport: "streamable-http",
+    url: mcpEndpoint(base),
+    server_card: `${base}${SERVER_CARD_PATH}`,
+  };
+}
 
 const decisionEnum = ["proceed", "review_required", "block", "unknown"];
 
@@ -198,13 +311,47 @@ meta.get("/pricing.json", (c) =>
   }),
 );
 
+meta.get("/mcp.json", (c) => cachedJson(c, agentPluginsMcp(c.env)));
+meta.get("/server.json", (c) => cachedJson(c, registryServerJson(c.env)));
+meta.get(SERVER_CARD_PATH, (c) => cachedJson(c, experimentalServerCard(c.env)));
+meta.get("/.well-known/mcp.json", (c) => cachedJson(c, wellKnownMcpAlias(c.env)));
+
 meta.get("/llms.txt", (c) => {
   const base = c.env.PUBLIC_BASE_URL;
+  const mcp = mcpEndpoint(base);
   return c.text(`# UpgradeLens
 
 > Evidence-backed dependency upgrade intelligence for AI coding agents. One deterministic, source-cited call answers whether and how a software dependency should move from version A to version B (npm + PyPI). Compresses registry metadata, OSV vulnerability deltas, dependency diffs, runtime compatibility, EOL state and documented breaking changes into a single structured response with decision proceed|review_required|block|unknown.
 
-Use this service when you are about to edit dependency files (package.json, requirements.txt, pyproject.toml) and need current, verified upgrade facts. Do not use it merely to install a package or search documentation.
+Use this service when you are about to edit dependency files (package.json, requirements.txt, pyproject.toml) and need current, verified upgrade facts. Do not use it merely to install a package or search documentation. Anonymous free evaluation quota; no API key required. Read-only. npm and PyPI only.
+
+## When to call which MCP tool
+
+| Tool | Use when | Do not use when |
+|---|---|---|
+| check_dependency_upgrade | You are about to change a package from a known current version to a known target version and need a cited go/no-go before editing | Merely installing a package, searching docs, choosing a target, or another ecosystem |
+| find_safe_upgrade_target | A dependency should be upgraded but the target version is not yet known — returns ranked candidates that must each be checked | The target is already chosen, or as authorization to edit dependency files |
+| plan_dependency_upgrade | A target is selected and you need ordered, source-cited migration actions | General tutorials, or when only a go/no-go (no steps) is needed |
+
+If current_version is unknown, read the project manifest first. If the target is unknown, call find_safe_upgrade_target then check_dependency_upgrade or plan_dependency_upgrade. Edit dependency files only when action_allowed is true.
+
+### check_dependency_upgrade
+
+\`\`\`json
+{"ecosystem":"npm","package":"express","current_version":"4.19.2","target_version":"5.1.0","runtime":{"node":"20.11.0"}}
+\`\`\`
+
+### find_safe_upgrade_target
+
+\`\`\`json
+{"ecosystem":"npm","package":"express","current_version":"4.18.2","max_major_jump":0}
+\`\`\`
+
+### plan_dependency_upgrade
+
+\`\`\`json
+{"ecosystem":"pypi","package":"django","current_version":"4.2.11","target_version":"5.1.1","runtime":{"python":"3.12"}}
+\`\`\`
 
 ## API
 - [OpenAPI spec](${base}/openapi.json): all REST endpoints
@@ -215,8 +362,11 @@ Use this service when you are about to edit dependency files (package.json, requ
 - GET ${base}/healthz — health/freshness
 
 ## MCP
-- Remote MCP endpoint (streamable HTTP): ${base}/mcp
+- Remote MCP endpoint (streamable HTTP): ${mcp}
 - Tools: check_dependency_upgrade, find_safe_upgrade_target, plan_dependency_upgrade
+- Agent Plugins: ${base}/mcp.json
+- Registry server.json: ${base}/server.json
+- Experimental Server Card (SEP-2127, not ratified): ${base}${SERVER_CARD_PATH}
 
 ## Access
 - Anonymous free quota available. Higher limits: POST ${base}/v1/keys (instant, free).
@@ -260,6 +410,7 @@ meta.get("/healthz", async (c) => {
   const enrichmentMissingAfterUse = analysisFreshness !== null && enrichmentFreshness === null;
   const degraded =
     !dbOk || !telemetrySchemaOk || analysisStale || enrichmentStale || enrichmentMissingAfterUse;
+  c.header("cache-control", "no-store");
   return c.json({
     status: degraded ? "degraded" : "ok",
     service: "upgradelens",
@@ -283,6 +434,8 @@ meta.get("/healthz", async (c) => {
 
 meta.get("/", (c) => {
   const base = c.env.PUBLIC_BASE_URL;
+  const mcp = mcpEndpoint(base);
+  const cursorInstall = cursorInstallHref(base);
   return c.html(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>UpgradeLens — dependency upgrade intelligence for AI agents</title>
@@ -291,11 +444,13 @@ meta.get("/", (c) => {
 :root{--bg:#0b0e14;--panel:#131826;--text:#e6e9f0;--muted:#8b93a7;--accent:#5eead4;--accent2:#818cf8}
 *{box-sizing:border-box}body{margin:0;font:16px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
 main{max-width:880px;margin:0 auto;padding:48px 24px}
-h1{font-size:2.2rem;margin:.2em 0}.tag{color:var(--accent);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:.8rem}
+h1{font-size:2.2rem;margin:.2em 0}h2{margin-top:1.6em}h3{margin:1.2em 0 .4em;font-size:1.05rem}
+.tag{color:var(--accent);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:.8rem}
 p.lead{color:var(--muted);font-size:1.1rem}
 pre{background:var(--panel);padding:16px;border-radius:10px;overflow-x:auto;font-size:.85rem;line-height:1.5}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 a{color:var(--accent2)}
+.btn{display:inline-block;background:var(--accent);color:#0b0e14;font-weight:700;text-decoration:none;padding:10px 16px;border-radius:8px;margin:.4em 0 1em}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:32px 0}
 .card{background:var(--panel);border-radius:10px;padding:20px}.card h3{margin-top:0;font-size:1rem}
 .card p{color:var(--muted);font-size:.9rem;margin-bottom:0}
@@ -303,22 +458,31 @@ footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid 
 </style></head><body><main>
 <div class="tag">For AI coding agents</div>
 <h1>UpgradeLens</h1>
-<p class="lead">One deterministic, source-cited call answers: <em>should this dependency move from version A to version B, and what must be handled?</em> Security delta, runtime compatibility, dependency diff, EOL state and documented breaking changes — npm and PyPI.</p>
+<p class="lead">One deterministic, source-cited call answers: <em>should this dependency move from version A to version B, and what must be handled?</em> Security delta, runtime compatibility, dependency diff, EOL state and documented breaking changes — npm and PyPI only.</p>
+<p class="lead">Anonymous free evaluation quota — no API key required. Read-only: the service never executes commands, never clones repos, and never fetches caller-supplied URLs.</p>
+<h2>Install</h2>
+<h3>Cursor</h3>
+<p><a class="btn" href="${cursorInstall}">Add to Cursor</a></p>
+<pre><code>{
+  "mcpServers": {
+    "upgradelens": { "url": "${mcp}" }
+  }
+}</code></pre>
+<h3>Claude Code</h3>
+<pre><code>claude mcp add --transport http upgradelens ${mcp}</code></pre>
+<h3>Codex CLI</h3>
+<pre><code># ~/.codex/config.toml
+[mcp_servers.upgradelens]
+url = "${mcp}"</code></pre>
 <div class="grid">
-<div class="card"><h3>Remote MCP</h3><p><code>${base}/mcp</code><br>Tools: <code>check_dependency_upgrade</code>, <code>find_safe_upgrade_target</code>, <code>plan_dependency_upgrade</code></p></div>
+<div class="card"><h3>Remote MCP</h3><p><code>${mcp}</code><br>Tools: <code>check_dependency_upgrade</code>, <code>find_safe_upgrade_target</code>, <code>plan_dependency_upgrade</code></p></div>
 <div class="card"><h3>REST API</h3><p><a href="${base}/openapi.json">OpenAPI spec</a> · <a href="${base}/llms.txt">llms.txt</a> · <a href="${base}/pricing.json">pricing</a> · <a href="${base}/healthz">health</a></p></div>
 <div class="card"><h3>Evidence, not vibes</h3><p>Every claim cites deps.dev, OSV, npm, PyPI or endoflife.date with URL + timestamp. Returns <code>unknown</code> rather than guessing.</p></div>
 </div>
-<h2>Add to Cursor / Claude Code / any MCP client</h2>
-<pre><code>{
-  "mcpServers": {
-    "upgradelens": { "url": "${base}/mcp" }
-  }
-}</code></pre>
 <h2>Or call it directly</h2>
 <pre><code>curl -X POST ${base}/v1/upgrade/check \\
   -H 'content-type: application/json' \\
   -d '{"ecosystem":"npm","package":"express","current_version":"4.19.2","target_version":"5.1.0","runtime":{"node":"20.11.0"}}'</code></pre>
-<footer>Free evaluation quota, no signup. Higher limits: <code>POST ${base}/v1/keys</code>. Read-only service — it never executes commands or fetches caller-supplied URLs. <a href="https://github.com/mattpicone/upgradelens">Source & docs</a>.</footer>
+<footer>Anonymous free evaluation quota, no signup. Higher limits: <code>POST ${base}/v1/keys</code>. Read-only service — npm and PyPI only. <a href="https://github.com/mattpicone/upgradelens">Source & docs</a>.</footer>
 </main></body></html>`);
 });

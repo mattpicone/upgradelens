@@ -2,30 +2,27 @@
 
 **Evidence-backed dependency upgrade intelligence for AI coding agents.**
 
-One deterministic, source-cited call answers: *should this dependency move from version A to version B, and what must be handled?* — instead of separately combining registry metadata, OSV vulnerability queries, dependency graphs, runtime constraints, EOL data, changelogs and release notes.
+Anonymous free evaluation quota — no signup and no API key required. Read-only.
+npm and PyPI only.
 
-- **Ecosystems:** npm, PyPI
-- **Remote MCP endpoint:** `https://upgradelens.mattpicone.workers.dev/mcp` (streamable HTTP)
-- **REST API:** [`/openapi.json`](https://upgradelens.mattpicone.workers.dev/openapi.json) · [`/llms.txt`](https://upgradelens.mattpicone.workers.dev/llms.txt) · [`/pricing.json`](https://upgradelens.mattpicone.workers.dev/pricing.json)
-- **Decisions:** `proceed | review_required | block | unknown` — `unknown` is returned rather than fabricated certainty
-- **Action gate:** agents may edit dependency files only when `action_allowed` is `true`; target discovery always requires a follow-up check
+One deterministic, source-cited call answers: *should this dependency move from
+version A to version B, and what must be handled?*
+
+- **Remote MCP:** `https://upgradelens.mattpicone.workers.dev/mcp` (streamable HTTP)
+- **REST:** [`/openapi.json`](https://upgradelens.mattpicone.workers.dev/openapi.json) · [`/llms.txt`](https://upgradelens.mattpicone.workers.dev/llms.txt) · [`/pricing.json`](https://upgradelens.mattpicone.workers.dev/pricing.json)
+- **Decisions:** `proceed | review_required | block | unknown` — `unknown` rather than fabricated certainty
+- **Action gate:** edit dependency files only when `action_allowed` is `true`; target discovery always requires a follow-up check
 - **Sources:** [deps.dev](https://deps.dev), [OSV.dev](https://osv.dev), [registry.npmjs.org](https://registry.npmjs.org), [pypi.org](https://pypi.org), [endoflife.date](https://endoflife.date). Every semantic claim carries evidence with a source URL and fetch timestamp.
-- **Read-only:** the service never executes commands, never clones repos, never fetches caller-supplied URLs.
-- **Free evaluation quota**, no signup. Higher limits with an instant free key (`POST /v1/keys`).
 
-## MCP tools
-
-| Tool | Use when | Do not use when |
-|---|---|---|
-| `check_dependency_upgrade` | You are about to change a package from a known current version to a known target version and need verified compatibility/vulnerability/EOL/breaking-change evidence before editing dependency files | Merely installing a package or searching docs |
-| `find_safe_upgrade_target` | A dependency should be upgraded but the target version is not yet known — returns ranked candidates that must each be checked | The target version is already chosen, or as authorization to edit dependency files |
-| `plan_dependency_upgrade` | A target is selected and you need ordered, source-cited migration actions | General tutorials |
-
-## Setup
+## Install
 
 ### Cursor
 
-Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+[Add UpgradeLens to Cursor](https://cursor.com/install-mcp?name=upgradelens&config=eyJ1cmwiOiJodHRwczovL3VwZ3JhZGVsZW5zLm1hdHRwaWNvbmUud29ya2Vycy5kZXYvbWNwIn0=)
+(official `cursor.com/install-mcp` installer; also works as
+`cursor://anysphere.cursor-deeplink/mcp/install?name=upgradelens&config=eyJ1cmwiOiJodHRwczovL3VwZ3JhZGVsZW5zLm1hdHRwaWNvbmUud29ya2Vycy5kZXYvbWNwIn0=`).
+
+Or add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 
 ```json
 {
@@ -36,6 +33,9 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
   }
 }
 ```
+
+A checked-in example is at [`examples/cursor/.cursor/mcp.json`](examples/cursor/.cursor/mcp.json).
+This is a docs/config install, not a Cursor Marketplace listing.
 
 ### Claude Code
 
@@ -53,24 +53,23 @@ url = "https://upgradelens.mattpicone.workers.dev/mcp"
 
 ### Gemini CLI
 
-Install this repository as a Gemini CLI extension, or use the checked-in
-`gemini-extension.json` manifest:
+This repository includes `gemini-extension.json` and `GEMINI.md`:
 
 ```bash
 gemini extensions install https://github.com/mattpicone/upgradelens
 ```
 
-The public extension is indexed from the `gemini-cli-extension` GitHub topic.
+The Gemini extension gallery indexes public repos that have the
+`gemini-cli-extension` GitHub topic. That topic is set on this repository;
+gallery listing is a separate crawl and is not claimed here.
 
 ### Agent Plugins (Copilot and compatible clients)
 
-This repository includes the portable Agent Plugins 1.0 `plugin.json` and
-`mcp.json` manifests. Clients that support the format can install the
-repository directly; no credential is embedded in the package.
+Portable Agent Plugins 1.0 `plugin.json` and `mcp.json` are in the repo root.
+No credential is embedded. Maintainer-directory indexing is separate from these
+files.
 
 ### Microsoft APM
-
-APM resolves the published MCP Registry entry:
 
 ```bash
 apm install --mcp io.github.mattpicone/upgradelens --transport http
@@ -113,6 +112,17 @@ curl -X POST https://upgradelens.mattpicone.workers.dev/v1/upgrade/check \
     "runtime": {"node": "20.11.0"}
   }'
 ```
+
+Higher limits with an instant free key (`POST /v1/keys`). The evaluation quota
+needs no key.
+
+## MCP tools
+
+| Tool | Use when | Do not use when |
+|---|---|---|
+| `check_dependency_upgrade` | You are about to change a package from a known current version to a known target version and need verified compatibility/vulnerability/EOL/breaking-change evidence before editing dependency files | Merely installing a package or searching docs |
+| `find_safe_upgrade_target` | A dependency should be upgraded but the target version is not yet known — returns ranked candidates that must each be checked | The target version is already chosen, or as authorization to edit dependency files |
+| `plan_dependency_upgrade` | A target is selected and you need ordered, source-cited migration actions | General tutorials |
 
 Response (abbreviated):
 

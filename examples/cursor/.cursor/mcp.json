@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "upgradelens": {
+      "url": "https://upgradelens.mattpicone.workers.dev/mcp"
+    }
+  }
+}

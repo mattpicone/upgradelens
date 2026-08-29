@@ -66,6 +66,7 @@ SERVICE_URL="$URL" OWNER_TOKEN="$OWNER_TOKEN" npm run verify:production:mcp
 echo "==> Syncing GitHub automation config"
 gh variable set SERVICE_URL --body "$URL" || true
 gh secret set ADMIN_KEY --body "$ADMIN_KEY" || true
+gh secret set OWNER_TOKEN --body "$OWNER_TOKEN" || true
 
 echo "==> Creating CI deploy token note"
 echo "NOTE: for CI deploys, create a Cloudflare API token (Workers Scripts:Edit + D1:Edit)"
