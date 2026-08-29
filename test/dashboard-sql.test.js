@@ -56,6 +56,12 @@ CREATE TABLE experiments (
   started_at TEXT NOT NULL,
   ended_at TEXT,
   metrics_json TEXT
+);
+CREATE TABLE dashboard_state (
+  id INTEGER PRIMARY KEY,
+  counts_reset_at TEXT NOT NULL,
+  reset_reason TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );`;
 
 function sqliteD1() {
@@ -290,6 +296,68 @@ describe("dashboard SQL classification boundaries", () => {
       ]),
     );
     expect(stats.grossMargin).toBeNull();
+    sqlite.close();
+  });
+
+  it("applies the recorded reset timestamp to every dashboard aggregate", async () => {
+    const { sqlite, d1 } = sqliteD1();
+    const now = Date.now();
+    const at = (daysAgo) => new Date(now - daysAgo * 864e5).toISOString();
+    const resetAt = at(1);
+    sqlite
+      .prepare("INSERT INTO dashboard_state (id, counts_reset_at, reset_reason, updated_at) VALUES (1, ?, 'fixture', ?)")
+      .run(resetAt, resetAt);
+    const base = {
+      external: 1,
+      traffic_class: "external",
+      actor_class: "external_tool_client",
+      verification_kind: "none",
+      classification_reason: "fixture",
+      classification_version: 1,
+      client_key: "key:reset-client",
+      http_method: "POST",
+      rpc_method: "tools/call",
+      event_kind: "tools_call",
+      requested_tool: "check_dependency_upgrade",
+      business_tool: "check_dependency_upgrade",
+      known_tool: 1,
+      tool_invoked: 1,
+      tool_success: 1,
+      owned_test: 0,
+      ecosystem: "npm",
+      package: "express",
+      cache_hit: 0,
+      status: 200,
+      latency_ms: 10,
+      unknown_result: 0,
+      auth_state: "none",
+    };
+    seedRow(sqlite, { ...base, request_id: "old", ts: at(2) });
+    seedRow(sqlite, { ...base, request_id: "fresh", ts: at(0) });
+    seedRow(sqlite, {
+      ...base,
+      request_id: "fresh-init",
+      ts: at(0),
+      rpc_method: "initialize",
+      event_kind: "initialize",
+      requested_tool: null,
+      business_tool: null,
+      known_tool: 0,
+      tool_invoked: 0,
+      tool_success: null,
+      actor_class: "unknown",
+    });
+    sqlite.prepare("INSERT INTO billing_ledger (ts, client_key, entry_type, amount_usd) VALUES (?, ?, 'credit', 1)").run(at(2), "key:reset-client");
+    sqlite.prepare("INSERT INTO billing_ledger (ts, client_key, entry_type, amount_usd) VALUES (?, ?, 'credit', 2)").run(at(0), "key:reset-client");
+
+    const stats = await collectStats({ DB: d1 });
+    expect(stats.countsResetAt).toBe(resetAt);
+    expect(stats.evaluationStartedAt).toBe(resetAt);
+    expect(stats.total).toMatchObject({ attempts: 1, success: 1, unique: 1 });
+    expect(stats.d30).toMatchObject({ attempts: 1, success: 1, unique: 1 });
+    expect(stats.funnel).toMatchObject({ discovery_events: 1, successful_business_calls: 1 });
+    expect(stats.revenue).toBe(2);
+    expect(stats.trafficByClass.every((row) => row.records <= 1)).toBe(true);
     sqlite.close();
   });
 });

@@ -24,6 +24,7 @@ perl -pi -e "s/^database_id = .*/database_id = \"$DB_ID\"/" wrangler.toml
 echo "==> Applying schema"
 npx wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql -y
 npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql -y
+npx wrangler d1 execute upgradelens --remote --file=./migrations/0005_dashboard_reset.sql -y
 
 echo "==> Setting worker secrets"
 OWNER_TOKEN="ulo_$(openssl rand -hex 24)"
@@ -56,6 +57,7 @@ npx wrangler deploy
 
 echo "==> Verifying health"
 curl -fsS -A "upgradelens-ci" "$URL/healthz"
+npx wrangler d1 execute upgradelens --remote --file=./migrations/0005_dashboard_reset.sql -y
 npx wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql -y
 
 echo "==> Verifying all MCP tools with owner-tagged traffic"

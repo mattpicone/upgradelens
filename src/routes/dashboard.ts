@@ -102,6 +102,7 @@ export interface Stats {
     legacy_unverifiable_events: number;
     first_discovery_ts: string | null;
   };
+  countsResetAt: string | null;
   evaluationStartedAt: string | null;
   unknownRate: number;
   cacheHitRate: number;
@@ -136,6 +137,21 @@ export async function collectStats(env: Env): Promise<Stats> {
   const all = async <T>(sql: string, ...binds: unknown[]): Promise<T[]> =>
     ((await db.prepare(sql).bind(...binds).all<T>()).results ?? []) as T[];
 
+  // Keep all underlying telemetry for audit, but make every dashboard metric
+  // relative to one immutable, recorded baseline. Older deployments may not
+  // have the table yet; the epoch fallback preserves pre-reset behavior until
+  // migration 0005 is applied.
+  let countsResetAt: string | null = null;
+  try {
+    const reset = await one<{ counts_reset_at: string }>(
+      `SELECT counts_reset_at FROM dashboard_state WHERE id=1`,
+    );
+    countsResetAt = reset?.counts_reset_at ?? null;
+  } catch {
+    // The schema migration is applied separately from code deployment.
+  }
+  const dashboardSince = countsResetAt ?? "0000-01-01T00:00:00.000Z";
+
   const todayRow = await one<{
     attempts: number;
     unique_c: number;
@@ -148,23 +164,27 @@ export async function collectStats(env: Env): Promise<Stats> {
        SUM(CASE WHEN tool_success=1 THEN 1 ELSE 0 END) success,
        SUM(CASE WHEN tool_success<>1 THEN 1 ELSE 0 END) failed,
        SUM(CASE WHEN error_kind IN ('service_error','server_error') THEN 1 ELSE 0 END) service_errors
-     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ?`,
+     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ? AND ts >= ?`,
     today,
+    dashboardSince,
   );
   const internalToday = await one<{ calls: number }>(
     `SELECT COUNT(*) calls FROM mcp_events
      WHERE classification_version=1 AND actor_class='internal'
-       AND event_kind='tools_call' AND known_tool=1 AND tool_invoked=1 AND ts >= ?`,
+       AND event_kind='tools_call' AND known_tool=1 AND tool_invoked=1 AND ts >= ? AND ts >= ?`,
     today,
+    dashboardSince,
   );
   const repeatToday = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
        INTERSECT
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts < ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts < ? AND ts >= ?
      )`,
     today,
+    dashboardSince,
     today,
+    dashboardSince,
   );
   const totalRow = await one<{
     attempts: number;
@@ -176,13 +196,15 @@ export async function collectStats(env: Env): Promise<Stats> {
        SUM(CASE WHEN tool_success=1 THEN 1 ELSE 0 END) success,
        COUNT(DISTINCT CASE WHEN tool_success=1 THEN client_key END) unique_c,
        MIN(CASE WHEN tool_success=1 THEN ts END) first_ts
-     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE}`,
+     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ?`,
+    dashboardSince,
   );
   const repeatTotal = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE}
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
        GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
      )`,
+    dashboardSince,
   );
   const d30Row = await one<{
     attempts: number;
@@ -196,57 +218,65 @@ export async function collectStats(env: Env): Promise<Stats> {
        COUNT(DISTINCT CASE WHEN tool_success=1 THEN client_key END) unique_c,
        SUM(CASE WHEN tool_success<>1 THEN 1 ELSE 0 END) failed,
        SUM(CASE WHEN error_kind IN ('service_error','server_error') THEN 1 ELSE 0 END) service_errors
-     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ?`,
+     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ? AND ts >= ?`,
     d30,
+    dashboardSince,
   );
   const active3 = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
        GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 3
      )`,
     d30,
+    dashboardSince,
   );
   const keyedActive3 = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
          AND client_key LIKE 'key:%'
        GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 3
      )`,
     d30,
+    dashboardSince,
   );
   const repeat30 = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
        GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
      )`,
     d30,
+    dashboardSince,
   );
   const keyedRepeat30 = await one<{ n: number }>(
     `SELECT COUNT(*) n FROM (
-       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+       SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
          AND client_key LIKE 'key:%'
        GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
      )`,
     d30,
+    dashboardSince,
   );
   const keyedUnique30 = await one<{ n: number }>(
     `SELECT COUNT(DISTINCT client_key) n FROM mcp_events
-     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND client_key LIKE 'key:%'`,
+     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ? AND client_key LIKE 'key:%'`,
     d30,
+    dashboardSince,
   );
   const daily = await all<{ day: string; calls: number }>(
     `SELECT substr(ts,1,10) day, COUNT(*) calls FROM mcp_events
-     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? GROUP BY day ORDER BY day`,
+     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ? GROUP BY day ORDER BY day`,
     d30,
+    dashboardSince,
   );
   const weeklyRows = await all<{ week: string; calls: number }>(
     `SELECT strftime('%Y-%m-%d', ts,
        '-' || ((CAST(strftime('%w', ts) AS INTEGER) + 6) % 7) || ' days') week,
        COUNT(*) calls
      FROM mcp_events
-     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts < ?
+     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ? AND ts < ?
      GROUP BY week ORDER BY week`,
     fiveWeeksStart.toISOString(),
+    dashboardSince,
     currentWeekStart.toISOString(),
   );
   const weeklyCounts = new Map(weeklyRows.map((row) => [row.week, row.calls]));
@@ -269,9 +299,10 @@ export async function collectStats(env: Env): Promise<Stats> {
     weeklyGrowth.every((week) => week.previous_calls > 0 && week.calls > week.previous_calls);
   const byTool = await all<{ tool: string; calls: number }>(
     `SELECT business_tool tool, COUNT(*) calls FROM mcp_events
-     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
+     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ?
      GROUP BY business_tool ORDER BY calls DESC LIMIT 12`,
     d30,
+    dashboardSince,
   );
   const trafficByClass = await all<Stats["trafficByClass"][number]>(
     `SELECT classification_version, traffic_class, event_kind, COUNT(*) records,
@@ -280,8 +311,10 @@ export async function collectStats(env: Env): Promise<Stats> {
        SUM(CASE WHEN tool_invoked=1 THEN 1 ELSE 0 END) invoked,
        SUM(CASE WHEN tool_success=1 THEN 1 ELSE 0 END) successes
      FROM mcp_events
+     WHERE ts >= ?
      GROUP BY classification_version, traffic_class, event_kind
      ORDER BY classification_version, traffic_class, records DESC, event_kind`,
+    dashboardSince,
   );
   const byToolClass = await all<{
     tool: string;
@@ -295,14 +328,16 @@ export async function collectStats(env: Env): Promise<Stats> {
             WHEN tool_invoked=0 THEN 'not_invoked'
             ELSE 'legacy_unknown' END invocation_state,
        COUNT(*) records, SUM(CASE WHEN tool_success=1 THEN 1 ELSE 0 END) successes
-     FROM mcp_events WHERE event_kind='tools_call' AND known_tool=1
+     FROM mcp_events WHERE event_kind='tools_call' AND known_tool=1 AND ts >= ?
      GROUP BY tool, actor_class, invocation_state ORDER BY records DESC, tool LIMIT 30`,
+    dashboardSince,
   );
   const topPackages = await all<{ package: string; calls: number }>(
     `SELECT package, COUNT(*) calls FROM mcp_events
-     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND package IS NOT NULL
+     WHERE ${GENUINE_TOOL_WHERE} AND ts >= ? AND ts >= ? AND package IS NOT NULL
      GROUP BY package ORDER BY calls DESC LIMIT 10`,
     d30,
+    dashboardSince,
   );
   const funnel = await one<Stats["funnel"]>(
     `SELECT
@@ -331,16 +366,16 @@ export async function collectStats(env: Env): Promise<Stats> {
        COUNT(DISTINCT CASE WHEN ${GENUINE_TOOL_WHERE} AND client_key NOT LIKE 'key:%'
          THEN client_key END) genuine_anonymous_identities,
        (SELECT COUNT(*) FROM (
-          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE}
+          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
           GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
         )) repeat_genuine_tool_clients,
        (SELECT COUNT(*) FROM (
-          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE}
+          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
             AND client_key LIKE 'key:%'
           GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
         )) repeat_keyed_clients,
        (SELECT COUNT(*) FROM (
-          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE}
+          SELECT client_key FROM mcp_events WHERE ${GENUINE_TOOL_WHERE} AND ts >= ?
             AND client_key NOT LIKE 'key:%'
           GROUP BY client_key HAVING COUNT(DISTINCT substr(ts,1,10)) >= 2
         )) repeat_anonymous_identities,
@@ -351,13 +386,18 @@ export async function collectStats(env: Env): Promise<Stats> {
        SUM(CASE WHEN auth_state='invalid_key' THEN 1 ELSE 0 END) invalid_auth_events,
        SUM(CASE WHEN classification_version=0 THEN 1 ELSE 0 END) legacy_unverifiable_events,
        MIN(ts) first_discovery_ts
-     FROM mcp_events WHERE external=1`,
+     FROM mcp_events WHERE external=1 AND ts >= ?`,
+    dashboardSince,
+    dashboardSince,
+    dashboardSince,
+    dashboardSince,
   );
   const byEvent = await all<{ event_kind: string; calls: number; clients: number }>(
     `SELECT event_kind, COUNT(*) calls, COUNT(DISTINCT client_key) clients
-     FROM mcp_events WHERE external=1 AND ts >= ?
+     FROM mcp_events WHERE external=1 AND ts >= ? AND ts >= ?
      GROUP BY event_kind ORDER BY calls DESC`,
     d30,
+    dashboardSince,
   );
   const verificationAgents = await all<{
     user_agent: string;
@@ -366,20 +406,23 @@ export async function collectStats(env: Env): Promise<Stats> {
   }>(
     `SELECT COALESCE(user_agent,'(empty)') user_agent, COUNT(*) events,
        SUM(CASE WHEN event_kind='tools_call' THEN 1 ELSE 0 END) tool_calls
-     FROM mcp_events WHERE external=1 AND traffic_class='verification' AND ts >= ?
+     FROM mcp_events WHERE external=1 AND traffic_class='verification' AND ts >= ? AND ts >= ?
      GROUP BY user_agent ORDER BY events DESC LIMIT 12`,
     d30,
+    dashboardSince,
   );
   const rates = await one<{ unknowns: number; hits: number; total: number }>(
     `SELECT SUM(unknown_result) unknowns, SUM(cache_hit) hits, COUNT(*) total
-     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ?`,
+     FROM mcp_events WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ? AND ts >= ?`,
     d30,
+    dashboardSince,
   );
   const lat = await all<{ latency_ms: number }>(
     `SELECT latency_ms FROM mcp_events
-     WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ?
+     WHERE ${ELIGIBLE_TOOL_ATTEMPT_WHERE} AND ts >= ? AND ts >= ?
      ORDER BY ts DESC LIMIT 2000`,
     new Date(Date.now() - 864e5).toISOString(),
+    dashboardSince,
   );
   lat.sort((a, b) => a.latency_ms - b.latency_ms);
   const pct = (p: number) =>
@@ -387,8 +430,9 @@ export async function collectStats(env: Env): Promise<Stats> {
   const ledger = await one<{ revenue: number; fees: number }>(
     `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue,
        COALESCE(SUM(CASE WHEN entry_type='fee' THEN amount_usd ELSE 0 END),0) fees
-     FROM billing_ledger WHERE ts >= ?`,
+     FROM billing_ledger WHERE ts >= ? AND ts >= ?`,
     d30,
+    dashboardSince,
   );
   const revenue = ledger?.revenue ?? 0;
   const fees = ledger?.fees ?? 0;
@@ -462,7 +506,9 @@ export async function collectStats(env: Env): Promise<Stats> {
       legacy_unverifiable_events: funnel?.legacy_unverifiable_events ?? 0,
       first_discovery_ts: funnel?.first_discovery_ts ?? null,
     },
-    evaluationStartedAt: experiment?.started_at ?? null,
+    // A requested reset starts a fresh measurement clock as well as zeroing
+    // the visible aggregates; the old experiment row remains audit history.
+    evaluationStartedAt: countsResetAt ?? experiment?.started_at ?? null,
     unknownRate: rates && rates.total > 0 ? (rates.unknowns ?? 0) / rates.total : 0,
     cacheHitRate: rates && rates.total > 0 ? (rates.hits ?? 0) / rates.total : 0,
     latency: { p50: pct(50), p95: pct(95), p99: pct(99) },
@@ -472,6 +518,7 @@ export async function collectStats(env: Env): Promise<Stats> {
     // Margin is deliberately undefined while all usage is free. Reporting a
     // zero margin here would falsely satisfy a paid-economics gate.
     grossMargin: revenue > 0 ? (revenue - fees) / revenue : null,
+    countsResetAt,
   };
 }
 
@@ -586,6 +633,8 @@ dashboard.get("/", async (c) => {
   if (c.req.query("format") === "json") {
     return c.json({
       generated_at: new Date().toISOString(),
+      counts_reset_at: s.countsResetAt,
+      counts_reset_scope: "All dashboard aggregates below include only telemetry and ledger rows at or after counts_reset_at; prior rows are retained for audit.",
       business_state: { state, why },
       definition: {
         genuine_business_tool_call:
@@ -663,6 +712,7 @@ table{border-collapse:collapse;width:100%;max-width:640px}td,th{text-align:left;
 <h1>UpgradeLens — owner dashboard</h1>
 <p><span class="state">${state}</span></p>
 <p class="muted">${why}</p>
+<p class="muted">Dashboard counts reset at: <b>${s.countsResetAt ?? "not recorded (apply migration 0005)"}</b>. Prior telemetry is retained for audit but excluded from the counters below.</p>
 <p class="muted">Out-of-pocket spend: <b class="ok">$0.00</b> (hard constraint) · Revenue (30d): $${s.revenue.toFixed(2)} · Payment fees: $${s.fees.toFixed(2)} · Gross profit: $${s.grossProfit.toFixed(2)} · Gross margin: ${s.grossMargin === null ? "not yet measurable while free" : `${(s.grossMargin * 100).toFixed(1)}%`} · Mode: ${activation.requested ? "PAYMENT ACTIVATION BLOCKED" : "FREE VALIDATION"}</p>
 
 <h2>Business signal — genuine external MCP tools/call only</h2>
@@ -718,7 +768,7 @@ ${spark}
 <div class="kpi"><b>${s.funnel.legacy_unverifiable_events}</b><span>legacy events excluded from business</span></div>
 </div>
 <table><tr><th>Protocol event kind</th><th>events (30d)</th><th>clients</th></tr>${rows(s.byEvent as never, ["event_kind", "calls", "clients"])}</table>
-<h2>Conclusive traffic separation (retained history)</h2>
+<h2>Conclusive traffic separation (since reset)</h2>
 <table><tr><th>classification</th><th>traffic class</th><th>event kind</th><th>records</th><th>clients</th><th>known tools</th><th>handler invoked</th><th>semantic successes</th></tr>${rows(s.trafficByClass as never, ["classification_version", "traffic_class", "event_kind", "records", "clients", "known_tools", "invoked", "successes"])}</table>
 <h2>Self-identified verification traffic (30d; excluded)</h2>
 <table><tr><th>User agent</th><th>events</th><th>tool calls</th></tr>${rows(s.verificationAgents as never, ["user_agent", "events", "tool_calls"])}</table>
@@ -732,7 +782,7 @@ ${spark}
 <div class="kpi"><b>${s.latency.p99}ms</b><span>p99 latency</span></div>
 </div>
 <table><tr><th>Actual UpgradeLens tool invoked</th><th>successful organic calls (30d)</th></tr>${rows(s.byTool as never, ["tool", "calls"])}</table>
-<h2>Known tool requests by traffic class (retained history)</h2>
+<h2>Known tool requests by traffic class (since reset)</h2>
 <table><tr><th>Tool</th><th>actor class</th><th>invocation state</th><th>records</th><th>semantic successes</th></tr>${rows(s.byToolClass as never, ["tool", "actor_class", "invocation_state", "records", "successes"])}</table>
 <h2>Most requested packages (30d)</h2>
 <table><tr><th>Package</th><th>calls</th></tr>${rows(s.topPackages as never, ["package", "calls"])}</table>

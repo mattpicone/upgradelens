@@ -29,6 +29,9 @@ successful business-tool calls, zero genuine tool clients, and zero repeats.
   send any MCP traffic until `/healthz` reports `db=ok` and
   `telemetry_schema=ok`, then owner-tags `initialize`, `tools/list`, and all
   three `tools/call` tools and reads the owner dashboard.
+- Migration `0005_dashboard_reset.sql` records the zero-count baseline in
+  `dashboard_state.counts_reset_at`; dashboard aggregates exclude earlier rows
+  while retaining them for audit.
 
 ## External gate
 
@@ -42,4 +45,5 @@ configured; it now verifies schema health and can run the guarded MCP smoke
 test when the optional `OWNER_TOKEN` repository secret is also configured.
 
 Do not classify the experiment as failed or successful until the production
-health gate passes and the owner dashboard has been read after the cutover.
+health gate passes, migration 0005 has recorded its timestamp, and the owner
+dashboard has been read after the cutover.

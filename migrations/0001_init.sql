@@ -158,6 +158,15 @@ CREATE TABLE IF NOT EXISTS experiments (
   metrics_json TEXT
 );
 
+-- Dashboard counters use an auditable baseline instead of deleting telemetry.
+-- Migration 0005 inserts the production reset timestamp idempotently.
+CREATE TABLE IF NOT EXISTS dashboard_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  counts_reset_at TEXT NOT NULL,
+  reset_reason TEXT NOT NULL DEFAULT 'business-validation-baseline',
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS rate_counters (
   bucket TEXT PRIMARY KEY,        -- e.g. 'm:<minute>:<client>' / 'd:<day>:<client>'
   count INTEGER NOT NULL DEFAULT 0,

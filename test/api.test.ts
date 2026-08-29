@@ -179,6 +179,9 @@ describe("dashboard auth", () => {
     const body = (await res.json()) as any;
     expect(body.business_state.state).toBe("WAITING FOR FIRST ORGANIC TOOL CALL");
     expect(body.definition.genuine_business_tool_call).toMatch(/post-cutover.*handler invoked.*semantic success/);
+    expect(body).toHaveProperty("counts_reset_at");
+    expect(body).toHaveProperty("counts_reset_scope");
+    expect(body.stats.countsResetAt).toBeNull();
     expect(body.stats.total.success).toBe(0);
     expect(body.stats.funnel.repeat_genuine_tool_clients).toBe(0);
   });

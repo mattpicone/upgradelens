@@ -60,6 +60,7 @@ Never log or commit these.
 - Logs: `npx wrangler tail upgradelens`.
 - DB schema change: append a new file to `migrations/`, apply with `wrangler d1 execute upgradelens --remote --file=...`. Apply `0002_hardening.sql` to existing deployments with `npm run db:harden:remote`.
 - Owner dashboard JSON: `curl --oauth2-bearer "<OWNER_TOKEN>" '<SERVICE_URL>/dashboard?format=json'`.
+- Dashboard reset: `npm run db:dashboard-reset:remote` establishes the one-time `dashboard_state.counts_reset_at` baseline. It is idempotent and does not delete telemetry; all dashboard counts and financial aggregates exclude rows before that timestamp. The dashboard JSON/HTML displays the exact reset time.
 
 ## Free-tier budget notes
 

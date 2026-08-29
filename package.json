@@ -18,6 +18,8 @@
     "db:harden:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0002_hardening.sql",
     "db:funnel:local": "wrangler d1 execute upgradelens --local --file=./migrations/0003_mcp_funnel.sql",
     "db:funnel:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql",
+    "db:dashboard-reset:local": "wrangler d1 execute upgradelens --local --file=./migrations/0005_dashboard_reset.sql",
+    "db:dashboard-reset:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0005_dashboard_reset.sql",
     "db:validation:start:local": "wrangler d1 execute upgradelens --local --file=./migrations/0004_activate_validation.sql",
     "db:validation:start:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql"
   },

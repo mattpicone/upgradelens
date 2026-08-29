@@ -60,6 +60,7 @@ function stats(overrides: Partial<Stats> = {}): Stats {
       legacy_unverifiable_events: 0,
       first_discovery_ts: null,
     },
+    countsResetAt: null,
     evaluationStartedAt: new Date().toISOString(),
     unknownRate: 0,
     cacheHitRate: 0,
