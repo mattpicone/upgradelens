@@ -23,6 +23,7 @@ prepared but inactive until demand thresholds are met.
     The selection corpus scorer is a required CI check.
   - `enrich.yml` — Mon/Thu: deterministic breaking-change extraction from GitHub releases → `/admin/breaking-changes` (needs `ADMIN_KEY` secret + `SERVICE_URL` variable).
   - `health.yml` — every 30 min: probes `/healthz`, opens one deduplicated GitHub issue on failure.
+  - After a successful deploy, `ci.yml` runs `npm run verify:production:mcp` when the optional `OWNER_TOKEN` repository secret is configured. The smoke test is gated on `telemetry_schema=ok`, exercises `initialize`, `tools/list`, and all three `tools/call` tools, then reads the owner dashboard; every request is owner-tagged and excluded from business metrics.
 
 ## Secrets
 
@@ -38,7 +39,7 @@ Never log or commit these.
 
 ## Business rules (encoded in `src/routes/dashboard.ts`)
 
-- External = an actual REST analysis or MCP tool call made without the owner token or a registered internal key. Protocol handshakes, health probes, docs, scans and key issuance never count.
+- MCP business demand is stricter than generic external traffic: only post-cutover, non-verification, non-owned `tools/call` events for a known UpgradeLens tool where the handler ran and returned semantic success count. `initialize`, `tools/list`, registry/auth verification, crawler/monitor traffic, unknown tools, invalid keys, owner tests and legacy rows remain visible but never influence business state.
 - Minimum continuation (45 days): >=25 successful external calls AND >=3 unique external clients AND >=1 repeat client. Below that after day 45 → dashboard shows **KILL / PIVOT**.
 - Promising: >=100 successful external calls/30d, >=10 clients, >=3 clients active 3+ days.
 - Strong: >=1,000 successful calls/30d, >=20 stable keyed repeat clients, four completed weeks of positive week-over-week growth, <2% service errors, and >75% measurable gross margin. A free-only period has no measurable gross margin and cannot satisfy this gate.

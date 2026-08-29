@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:selection:score": "node scripts/score-mcp-selection.mjs",
+    "verify:production:mcp": "node scripts/verify-production-mcp.mjs",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 execute upgradelens --local --file=./migrations/0001_init.sql",
     "db:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql",
