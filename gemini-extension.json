@@ -1,0 +1,12 @@
+{
+  "name": "upgradelens",
+  "version": "0.2.1",
+  "description": "Evidence-backed npm and PyPI dependency upgrade risk analysis for coding agents.",
+  "mcpServers": {
+    "upgradelens": {
+      "httpUrl": "https://upgradelens.mattpicone.workers.dev/mcp",
+      "timeout": 30000
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}

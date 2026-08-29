@@ -51,6 +51,31 @@ claude mcp add --transport http upgradelens https://upgradelens.mattpicone.worke
 url = "https://upgradelens.mattpicone.workers.dev/mcp"
 ```
 
+### Gemini CLI
+
+Install this repository as a Gemini CLI extension, or use the checked-in
+`gemini-extension.json` manifest:
+
+```bash
+gemini extensions install https://github.com/mattpicone/upgradelens
+```
+
+The public extension is indexed from the `gemini-cli-extension` GitHub topic.
+
+### Agent Plugins (Copilot and compatible clients)
+
+This repository includes the portable Agent Plugins 1.0 `plugin.json` and
+`mcp.json` manifests. Clients that support the format can install the
+repository directly; no credential is embedded in the package.
+
+### Microsoft APM
+
+APM resolves the published MCP Registry entry:
+
+```bash
+apm install --mcp io.github.mattpicone/upgradelens --transport http
+```
+
 ### PydanticAI
 
 ```python
