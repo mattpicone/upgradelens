@@ -13,7 +13,9 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     env:
-      SERVICE_URL: ${{ vars.SERVICE_URL }}
+      # Keep monitoring independent of local/Codex configuration. A project
+      # variable may override this if the public Worker URL ever changes.
+      SERVICE_URL: ${{ vars.SERVICE_URL || 'https://upgradelens.mattpicone.workers.dev' }}
     steps:
       - name: Probe healthz
         if: env.SERVICE_URL != ''
