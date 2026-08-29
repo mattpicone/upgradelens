@@ -58,6 +58,9 @@ echo "==> Verifying health"
 curl -fsS -A "upgradelens-ci" "$URL/healthz"
 npx wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql -y
 
+echo "==> Verifying all MCP tools with owner-tagged traffic"
+SERVICE_URL="$URL" OWNER_TOKEN="$OWNER_TOKEN" npm run verify:production:mcp
+
 echo "==> Syncing GitHub automation config"
 gh variable set SERVICE_URL --body "$URL" || true
 gh secret set ADMIN_KEY --body "$ADMIN_KEY" || true
