@@ -105,7 +105,7 @@ for (const [name, arguments_] of calls) {
 const dashboard = await jsonFetch("/dashboard?format=json", {
   headers: { authorization: `Bearer ${OWNER_TOKEN}` },
 });
-const funnel = dashboard?.funnel || {};
+const funnel = dashboard?.stats?.funnel || {};
   console.log(
     JSON.stringify(
       {
@@ -115,6 +115,7 @@ const funnel = dashboard?.funnel || {};
         tools_list: names,
         calls: results,
         business_state: dashboard?.business_state?.state ?? null,
+        counts_reset_at: dashboard?.counts_reset_at ?? null,
         internal_verification_calls: funnel.known_tool_invocations ?? null,
         genuine_business_calls: funnel.successful_business_calls ?? null,
         genuine_tool_clients: funnel.genuine_tool_clients ?? null,
