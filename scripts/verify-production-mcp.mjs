@@ -19,14 +19,19 @@ if (!OWNER_TOKEN) {
 }
 
 async function jsonFetch(path, init = {}) {
-  const response = await fetch(`${SERVICE_URL}${path}`, {
-    ...init,
-    headers: {
-      accept: "application/json",
-      "user-agent": USER_AGENT,
-      ...(init.headers || {}),
-    },
-  });
+  let response;
+  try {
+    response = await fetch(`${SERVICE_URL}${path}`, {
+      ...init,
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    throw new Error(`${path} network failure: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
   const text = await response.text();
   let body;
   try {
@@ -38,12 +43,13 @@ async function jsonFetch(path, init = {}) {
   return body;
 }
 
-const health = await jsonFetch("/healthz");
-if (health?.db !== "ok" || health?.telemetry_schema !== "ok") {
-  throw new Error(
-    `Refusing MCP verification until DB and telemetry schema are healthy (db=${health?.db ?? "missing"}, telemetry_schema=${health?.telemetry_schema ?? "missing"})`,
-  );
-}
+try {
+  const health = await jsonFetch("/healthz");
+  if (health?.db !== "ok" || health?.telemetry_schema !== "ok") {
+    throw new Error(
+      `Refusing MCP verification until DB and telemetry schema are healthy (db=${health?.db ?? "missing"}, telemetry_schema=${health?.telemetry_schema ?? "missing"})`,
+    );
+  }
 
 let nextId = 1;
 async function mcp(method, params = {}) {
@@ -100,21 +106,25 @@ const dashboard = await jsonFetch("/dashboard?format=json", {
   headers: { authorization: `Bearer ${OWNER_TOKEN}` },
 });
 const funnel = dashboard?.funnel || {};
-console.log(
-  JSON.stringify(
-    {
-      service: SERVICE_URL,
-      health: { db: health.db, telemetry_schema: health.telemetry_schema },
-      initialized_protocol: initialized.protocolVersion,
-      tools_list: names,
-      calls: results,
-      business_state: dashboard?.business_state?.state ?? null,
-      internal_verification_calls: funnel.known_tool_invocations ?? null,
-      genuine_business_calls: funnel.successful_business_calls ?? null,
-      genuine_tool_clients: funnel.genuine_tool_clients ?? null,
-      repeat_genuine_tool_clients: funnel.repeat_genuine_tool_clients ?? null,
-    },
-    null,
-    2,
-  ),
-);
+  console.log(
+    JSON.stringify(
+      {
+        service: SERVICE_URL,
+        health: { db: health.db, telemetry_schema: health.telemetry_schema },
+        initialized_protocol: initialized.protocolVersion,
+        tools_list: names,
+        calls: results,
+        business_state: dashboard?.business_state?.state ?? null,
+        internal_verification_calls: funnel.known_tool_invocations ?? null,
+        genuine_business_calls: funnel.successful_business_calls ?? null,
+        genuine_tool_clients: funnel.genuine_tool_clients ?? null,
+        repeat_genuine_tool_clients: funnel.repeat_genuine_tool_clients ?? null,
+      },
+      null,
+      2,
+    ),
+  );
+} catch (error) {
+  console.error(`Production MCP verification failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  process.exitCode = 1;
+}
