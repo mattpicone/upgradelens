@@ -281,6 +281,7 @@ describe("dashboard SQL classification boundaries", () => {
       legacy_unverifiable_events: 1,
     });
     expect(stats.d30).toMatchObject({ attempts: 4, success: 3, unique: 2, service_errors: 1 });
+    expect(stats.overview).toMatchObject({ totalCalls: 12, revenue: 0 });
     expect(stats.byTool).toEqual(
       expect.arrayContaining([
         { tool: "check_dependency_upgrade", calls: 1 },
@@ -355,6 +356,7 @@ describe("dashboard SQL classification boundaries", () => {
     expect(stats.evaluationStartedAt).toBe(resetAt);
     expect(stats.total).toMatchObject({ attempts: 1, success: 1, unique: 1 });
     expect(stats.d30).toMatchObject({ attempts: 1, success: 1, unique: 1 });
+    expect(stats.overview).toMatchObject({ totalCalls: 2, revenue: 2 });
     expect(stats.funnel).toMatchObject({ discovery_events: 1, successful_business_calls: 1 });
     expect(stats.revenue).toBe(2);
     expect(stats.trafficByClass.every((row) => row.records <= 1)).toBe(true);

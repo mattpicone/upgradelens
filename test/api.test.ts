@@ -179,10 +179,13 @@ describe("dashboard auth", () => {
     );
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toMatch(/WAITING FOR FIRST ORGANIC TOOL CALL|owner dashboard/);
-    expect(html).toMatch(/genuine external tools\/call requests/);
-    expect(html).toMatch(/actual UpgradeLens tools invoked/);
-    expect(html).toMatch(/repeat genuine tool clients/);
+    expect(html).toMatch(/Waiting for real users|Owner dashboard/);
+    expect(html).toMatch(/All calls/);
+    expect(html).toMatch(/Good calls/);
+    expect(html).toMatch(/Money made/);
+    expect(html).toMatch(/<details>/);
+    expect(html).not.toMatch(/<details\s+open/);
+    expect(html).toMatch(/View details/);
     expect(html).toMatch(/\$0\.00/);
     expect(res.headers.get("cache-control")).toMatch(/no-store/);
     expect(res.headers.get("referrer-policy")).toBe("no-referrer");
@@ -202,6 +205,7 @@ describe("dashboard auth", () => {
     expect(body).toHaveProperty("counts_reset_at");
     expect(body).toHaveProperty("counts_reset_scope");
     expect(body.stats.countsResetAt).toBeNull();
+    expect(body.stats.overview).toEqual({ totalCalls: 0, revenue: 0 });
     expect(body.stats.total.success).toBe(0);
     expect(body.stats.funnel.repeat_genuine_tool_clients).toBe(0);
   });
@@ -251,7 +255,7 @@ describe("dashboard auth", () => {
       fakeCtx,
     );
     expect(res.status).toBe(200);
-    expect(await res.text()).toMatch(/owner dashboard/);
+    expect(await res.text()).toMatch(/owner dashboard/i);
   });
   it("rejects a wrong token at sign-in and clears the session on logout", async () => {
     const bad = await app.request(

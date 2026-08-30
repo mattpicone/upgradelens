@@ -21,16 +21,19 @@ function loginPage(status: 200 | 401, message?: string) {
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>UpgradeLens — owner sign-in</title>
 <style>
-body{margin:0;font:16px/1.5 ui-sans-serif,system-ui;background:#0b0e14;color:#e6e9f0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
-form{background:#131826;border-radius:12px;padding:28px;max-width:360px;width:100%}
-h1{font-size:1.2rem;margin:0 0 4px}p{color:#8b93a7;font-size:.85rem;margin:0 0 16px}
-input{width:100%;box-sizing:border-box;background:#0b0e14;color:#e6e9f0;border:1px solid #232a3d;border-radius:8px;padding:12px;font-size:1rem;margin-bottom:12px}
-button{width:100%;background:#5eead4;color:#0b0e14;border:0;border-radius:8px;padding:12px;font-size:1rem;font-weight:700}
-.err{color:#f87171;font-size:.85rem;margin:0 0 12px}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#E8DCC7;color:#30361f;font:16px/1.5 "Avenir Next",Avenir,"Trebuchet MS",sans-serif}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.8'/%3E%3C/svg%3E")}
+form{position:relative;background:#D4B895;border:1px solid #B08B6E;border-radius:28px;padding:clamp(24px,7vw,40px);max-width:420px;width:100%}
+h1{font-size:clamp(1.8rem,7vw,2.5rem);line-height:1.05;letter-spacing:-.04em;margin:0 0 8px}p{color:#606C38;font-size:.95rem;margin:0 0 24px}
+input{width:100%;background:#E8DCC7;color:#30361f;border:1px solid #8B9D83;border-radius:18px;padding:15px 16px;font:inherit;margin-bottom:12px;outline:none}
+input:focus{border-color:#C66B3D;box-shadow:0 0 0 3px rgba(198,107,61,.18)}
+button{width:100%;background:#606C38;color:#E8DCC7;border:0;border-radius:18px;padding:15px 18px;font:inherit;font-weight:700;cursor:pointer}
+button:hover{background:#30361f}.err{color:#8b3625;font-size:.9rem;margin:0 0 12px}
 </style></head><body>
 <form method="post" action="/dashboard/login">
-<h1>UpgradeLens owner dashboard</h1>
-<p>Paste the owner token once. This device stays signed in for 90 days.</p>
+<h1>UpgradeLens</h1>
+<p>Enter your owner token to view the dashboard. This device stays signed in for 90 days.</p>
 ${message ? `<p class="err">${message}</p>` : ""}
 <input type="password" name="token" placeholder="Owner token" autocomplete="current-password" autofocus required>
 <button type="submit">Sign in</button>
@@ -63,6 +66,10 @@ function utcWeekStart(date: Date): Date {
 }
 
 export interface Stats {
+  overview: {
+    totalCalls: number;
+    revenue: number;
+  };
   today: {
     attempts: number;
     unique: number;
@@ -189,6 +196,11 @@ export async function collectStats(env: Env): Promise<Stats> {
     // The schema migration is applied separately from code deployment.
   }
   const dashboardSince = countsResetAt ?? "0000-01-01T00:00:00.000Z";
+
+  const overviewCalls = await one<{ total_calls: number }>(
+    `SELECT COUNT(*) total_calls FROM mcp_events WHERE ts >= ?`,
+    dashboardSince,
+  );
 
   const todayRow = await one<{
     attempts: number;
@@ -474,6 +486,11 @@ export async function collectStats(env: Env): Promise<Stats> {
   );
   const revenue = ledger?.revenue ?? 0;
   const fees = ledger?.fees ?? 0;
+  const lifetimeLedger = await one<{ revenue: number }>(
+    `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue
+     FROM billing_ledger WHERE ts >= ?`,
+    dashboardSince,
+  );
   const experiment = await one<{ started_at: string }>(
     `SELECT started_at FROM experiments
      WHERE name='organic_mcp_validation' AND ended_at IS NULL
@@ -481,6 +498,10 @@ export async function collectStats(env: Env): Promise<Stats> {
   );
 
   return {
+    overview: {
+      totalCalls: overviewCalls?.total_calls ?? 0,
+      revenue: lifetimeLedger?.revenue ?? 0,
+    },
     today: {
       attempts: todayRow?.attempts ?? 0,
       unique: todayRow?.unique_c ?? 0,
@@ -748,117 +769,237 @@ dashboard.get("/", async (c) => {
           .map((r) => `<tr>${cols.map((col) => `<td>${esc(r[col])}</td>`).join("")}</tr>`)
           .join("");
 
-  const stateColor =
-    {
-      "WAITING FOR FIRST ORGANIC TOOL CALL": "#8b93a7",
-      "CANDIDATE ORGANIC CALL OBSERVED": "#fbbf24",
-      "FIRST ORGANIC CALL CONFIRMED — WAITING FOR REPEAT USER": "#fbbf24",
-      "REPEAT ANONYMOUS TOOL IDENTITY OBSERVED": "#5eead4",
-      "REPEAT ORGANIC TOOL USER CONFIRMED": "#5eead4",
-      "EARLY SIGNAL": "#fbbf24",
-      PROMISING: "#5eead4",
-      "STRONG SIGNAL": "#34d399",
-      "MONETIZATION TEST ELIGIBLE": "#818cf8",
-      "VALIDATED PAID USAGE": "#34d399",
-      "KILL / PIVOT": "#f87171",
-    }[state] ?? "#8b93a7";
+  const daysLive = s.evaluationStartedAt
+    ? Math.max(0, Math.floor((Date.now() - new Date(s.evaluationStartedAt).getTime()) / 864e5))
+    : 0;
+  const verdicts: Record<string, { title: string; summary: string; next: string; color: string }> = {
+    "WAITING FOR FIRST ORGANIC TOOL CALL": {
+      title: "Waiting for real users",
+      summary: `${s.overview.totalCalls} calls have reached UpgradeLens, but none were successful real-user calls yet.`,
+      next: "Leave it running. The next milestone is one good call.",
+      color: "#C08E3A",
+    },
+    "CANDIDATE ORGANIC CALL OBSERVED": {
+      title: "A real user may have shown up",
+      summary: "UpgradeLens received its first possible real-user call. A repeat visit will make the signal stronger.",
+      next: "Keep watching for another good call from the same user.",
+      color: "#C08E3A",
+    },
+    "FIRST ORGANIC CALL CONFIRMED — WAITING FOR REPEAT USER": {
+      title: "A real user showed up",
+      summary: "UpgradeLens completed a successful call for a real user. Now it needs someone to come back.",
+      next: "Keep it running and watch for a returning user.",
+      color: "#8B9D83",
+    },
+    "REPEAT ANONYMOUS TOOL IDENTITY OBSERVED": {
+      title: "Someone may have come back",
+      summary: "The same anonymous identity used UpgradeLens successfully on more than one day.",
+      next: "Keep watching for more repeat use.",
+      color: "#8B9D83",
+    },
+    "REPEAT ORGANIC TOOL USER CONFIRMED": {
+      title: "Someone came back",
+      summary: "A real user returned and used UpgradeLens successfully again.",
+      next: "Keep growing repeat use.",
+      color: "#606C38",
+    },
+    "EARLY SIGNAL": {
+      title: "Early traction",
+      summary: "UpgradeLens has enough real use to justify continuing the experiment.",
+      next: "Keep improving distribution and watch repeat use.",
+      color: "#606C38",
+    },
+    PROMISING: {
+      title: "This is gaining traction",
+      summary: "Real users are using UpgradeLens often enough to call the experiment promising.",
+      next: "Keep the product stable and focus on reaching more users.",
+      color: "#606C38",
+    },
+    "STRONG SIGNAL": {
+      title: "It is working",
+      summary: "Usage, repeat activity, reliability, and economics all show a strong signal.",
+      next: "Keep scaling what is already working.",
+      color: "#606C38",
+    },
+    "MONETIZATION TEST ELIGIBLE": {
+      title: "Ready to test revenue",
+      summary: "Usage is strong enough to consider a controlled payment test.",
+      next: "Plan a small payment pilot before enabling billing.",
+      color: "#606C38",
+    },
+    "VALIDATED PAID USAGE": {
+      title: "Paid usage is working",
+      summary: "Customers are paying and the product economics are healthy.",
+      next: "Keep scaling carefully.",
+      color: "#606C38",
+    },
+    "KILL / PIVOT": {
+      title: "Time to rethink it",
+      summary: "The experiment has run long enough without enough real usage.",
+      next: "Change distribution or reposition the product before building more.",
+      color: "#C66B3D",
+    },
+  };
+  const verdict = verdicts[state] ?? {
+    title: "Keep watching",
+    summary: why,
+    next: "Check back after more usage arrives.",
+    color: "#8B9D83",
+  };
+  const number = new Intl.NumberFormat("en-US");
+  const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const earlySignalProgress = Math.min(100, (s.total.success / THRESHOLDS.minimum.calls) * 100);
+  const lastUpdated = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Indiana/Indianapolis",
+  }).format(new Date());
 
   return c.html(`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>UpgradeLens — owner dashboard</title>
 <style>
-body{margin:0;font:14px/1.5 ui-sans-serif,system-ui;background:#0b0e14;color:#e6e9f0;padding:24px}
-h1{font-size:1.4rem}h2{font-size:1rem;color:#8b93a7;margin:24px 0 8px;text-transform:uppercase;letter-spacing:.06em}
-.state{display:inline-block;padding:8px 16px;border-radius:8px;font-weight:700;font-size:1.2rem;background:#131826;border:2px solid ${stateColor};color:${stateColor}}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:12px 0}
-.kpi{background:#131826;border-radius:8px;padding:12px}.kpi b{display:block;font-size:1.5rem}.kpi span{color:#8b93a7;font-size:.8rem}
-table{border-collapse:collapse;width:100%;max-width:640px}td,th{text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid #232a3d;font-size:.85rem}
-.muted{color:#8b93a7}.ok{color:#34d399}.warn{color:#fbbf24}
+*{box-sizing:border-box}
+:root{--sand:#E8DCC7;--oat:#D4B895;--sage:#8B9D83;--clay:#B08B6E;--terracotta:#C66B3D;--ochre:#C08E3A;--moss:#606C38;--ink:#30361f}
+html{background:var(--sand)}
+body{margin:0;min-height:100vh;background:var(--sand);color:var(--ink);font:16px/1.5 "Avenir Next",Avenir,"Trebuchet MS",sans-serif;padding:clamp(18px,4vw,48px)}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.8'/%3E%3C/svg%3E")}
+button,summary{font:inherit}button:focus-visible,summary:focus-visible{outline:3px solid var(--terracotta);outline-offset:3px}.shell{position:relative;max-width:1080px;margin:0 auto}
+.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin:0 0 clamp(24px,5vw,52px)}
+.brand{margin:0;font-size:clamp(1.35rem,4vw,1.85rem);letter-spacing:-.035em}.brand span{display:block;color:var(--moss);font-size:.82rem;font-weight:500;letter-spacing:0;margin-top:3px}
+.updated{margin:0;color:var(--moss);font-size:.82rem;text-align:right;white-space:nowrap}
+.verdict{position:relative;overflow:hidden;background:var(--oat);border:1px solid var(--clay);border-radius:32px;padding:clamp(24px,6vw,58px);margin-bottom:18px}
+.verdict:after{content:"";position:absolute;width:190px;height:190px;border:34px solid ${verdict.color};border-radius:50%;right:-80px;top:-92px;opacity:.23;animation:breathe 4s ease-in-out infinite}
+.eyebrow{display:flex;align-items:center;gap:10px;color:var(--moss);font-size:.88rem;font-weight:700;margin:0 0 16px}.signal{width:12px;height:12px;border-radius:50%;background:${verdict.color};flex:0 0 auto}
+.verdict h1{position:relative;max-width:760px;font-size:clamp(2.45rem,8vw,6rem);line-height:.94;letter-spacing:-.065em;margin:0 0 24px}
+.verdict-copy{position:relative;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.75fr);gap:clamp(20px,5vw,64px);align-items:end}
+.verdict-copy p{margin:0;font-size:clamp(1rem,2.3vw,1.24rem);max-width:620px}.next{border-left:2px solid ${verdict.color};padding-left:16px;color:var(--moss);font-size:.94rem}
+.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:18px 0}
+.metric{min-height:190px;display:flex;flex-direction:column;justify-content:space-between;background:rgba(212,184,149,.56);border:1px solid var(--clay);border-radius:28px;padding:24px}
+.metric-label{color:var(--moss);font-size:.95rem;font-weight:700}.metric-value{font-size:clamp(3rem,7vw,5.5rem);line-height:.9;letter-spacing:-.07em;font-variant-numeric:tabular-nums;margin:26px 0 18px}.metric-help{color:var(--moss);font-size:.82rem;margin:0;max-width:220px}
+.checkpoint{display:grid;grid-template-columns:minmax(170px,.55fr) minmax(0,1fr);gap:28px;align-items:center;background:var(--sage);border-radius:28px;padding:24px;margin:18px 0 28px;color:var(--ink)}
+.checkpoint p{margin:0}.checkpoint strong{display:block;font-size:1.2rem;letter-spacing:-.02em;margin-top:3px}.progress{height:12px;background:rgba(232,220,199,.55);border-radius:999px;overflow:hidden}.progress span{display:block;height:100%;width:${earlySignalProgress}%;background:var(--moss);border-radius:inherit;transition:width 450ms ease}.progress-copy{display:flex;justify-content:space-between;gap:12px;font-size:.8rem;margin-top:8px;color:var(--ink)}
+details{background:rgba(212,184,149,.34);border:1px solid var(--clay);border-radius:28px;margin-top:18px;overflow:hidden}summary{cursor:pointer;list-style-position:inside;padding:20px 24px;font-weight:700;color:var(--ink)}summary:hover{background:rgba(212,184,149,.45)}
+.details-body{border-top:1px solid var(--clay);padding:8px 24px 28px}h2{font-size:1.25rem;letter-spacing:-.025em;margin:30px 0 12px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:12px 0}.kpi{background:rgba(232,220,199,.62);border-radius:18px;padding:15px}.kpi b{display:block;font-size:1.45rem;font-variant-numeric:tabular-nums}.kpi span{color:var(--moss);font-size:.78rem}
+.spark{max-width:100%;overflow-x:auto;padding:8px 0}.table-wrap{width:100%;overflow-x:auto;margin:10px 0 22px}table{border-collapse:collapse;width:100%;min-width:560px}td,th{text-align:left;padding:9px 12px 9px 0;border-bottom:1px solid var(--clay);font-size:.82rem;vertical-align:top}th{color:var(--moss)}.muted{color:var(--moss)}.ok{color:var(--moss)}.warn{color:var(--terracotta)}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82em}
+.footer{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:24px 0 8px;color:var(--moss);font-size:.78rem}.signout{background:transparent;border:1px solid var(--clay);color:var(--moss);border-radius:16px;padding:10px 14px;cursor:pointer}.signout:hover{border-color:var(--moss);color:var(--ink)}
+@keyframes breathe{0%,100%{transform:scale(.96)}50%{transform:scale(1.04)}}
+@media (prefers-reduced-motion:reduce){.verdict:after{animation:none}.progress span{transition:none}}
+@media (max-width:720px){body{padding:18px}.topbar{align-items:flex-start}.updated{font-size:.74rem}.verdict{border-radius:26px}.verdict:after{width:130px;height:130px;border-width:24px;right:-58px;top:-58px}.verdict-copy{grid-template-columns:1fr}.next{max-width:420px}.metric-grid{grid-template-columns:1fr;gap:12px}.metric{min-height:150px;border-radius:24px}.metric-value{margin:18px 0 12px}.checkpoint{grid-template-columns:1fr;gap:18px;border-radius:24px}.details-body{padding:4px 16px 22px}summary{padding:18px}.footer{align-items:flex-start;flex-direction:column-reverse}}
 </style></head><body>
-<h1>UpgradeLens — owner dashboard</h1>
-<p><span class="state">${state}</span></p>
-<p class="muted">${why}</p>
-<p class="muted">Dashboard counts reset at: <b>${s.countsResetAt ?? "not recorded (apply migration 0005)"}</b>. Prior telemetry is retained for audit but excluded from the counters below.</p>
-<p class="muted">Out-of-pocket spend: <b class="ok">$0.00</b> (hard constraint) · Revenue (30d): $${s.revenue.toFixed(2)} · Payment fees: $${s.fees.toFixed(2)} · Gross profit: $${s.grossProfit.toFixed(2)} · Gross margin: ${s.grossMargin === null ? "not yet measurable while free" : `${(s.grossMargin * 100).toFixed(1)}%`} · Mode: ${activation.requested ? "PAYMENT ACTIVATION BLOCKED" : "FREE VALIDATION"}</p>
+<main class="shell">
+<header class="topbar">
+  <p class="brand">UpgradeLens<span>Owner dashboard</span></p>
+  <p class="updated">Updated ${lastUpdated}</p>
+</header>
 
-<h2>Business signal — genuine external MCP tools/call only</h2>
-<div class="grid">
-<div class="kpi"><b>${s.today.success}</b><span>successful organic calls today</span></div>
-<div class="kpi"><b>${s.today.attempts}</b><span>known external tool invocations today</span></div>
-<div class="kpi"><b>${s.today.unique}</b><span>genuine clients today</span></div>
-<div class="kpi"><b>${s.today.repeat}</b><span>returning clients today</span></div>
-<div class="kpi"><b>${s.total.success}</b><span>successful organic calls since cutover</span></div>
-<div class="kpi"><b>${errRateToday}%</b><span>semantic failure rate</span></div>
-<div class="kpi"><b>${serviceErrRateToday}%</b><span>service error rate</span></div>
-<div class="kpi"><b>${s.today.internal_calls}</b><span>owner/test tool calls excluded</span></div>
-</div>
+<section class="verdict" aria-labelledby="verdict-title">
+  <p class="eyebrow"><span class="signal" aria-hidden="true"></span>Day ${daysLive} of the experiment</p>
+  <h1 id="verdict-title">${verdict.title}</h1>
+  <div class="verdict-copy">
+    <p>${verdict.summary}</p>
+    <p class="next"><strong>What to do now</strong><br>${verdict.next}</p>
+  </div>
+</section>
 
-<h2>Genuine business-tool trends — last 30 days</h2>
-${spark}
-<div class="grid">
-<div class="kpi"><b>${s.d30.success}</b><span>successful organic calls / 30d</span></div>
-<div class="kpi"><b>${s.d30.attempts}</b><span>known external invocations / 30d</span></div>
-<div class="kpi"><b>${s.d30.unique}</b><span>genuine clients / 30d</span></div>
-<div class="kpi"><b>${s.d30.repeat}</b><span>repeat genuine clients / 30d</span></div>
-<div class="kpi"><b>${s.d30.active3days}</b><span>genuine clients active 3+ days</span></div>
-<div class="kpi"><b>${s.total.attempts}</b><span>known invocations since cutover</span></div>
-<div class="kpi"><b>${s.total.unique}</b><span>genuine clients since cutover</span></div>
-<div class="kpi"><b>${s.fourPositiveGrowthWeeks ? "yes" : "no"}</b><span>four completed weeks positive growth</span></div>
-<div class="kpi"><b>${s.grossMargin === null ? "n/a" : `${(s.grossMargin * 100).toFixed(1)}%`}</b><span>gross margin (30d)</span></div>
-</div>
+<section class="metric-grid" aria-label="Key numbers since tracking started">
+  <article class="metric">
+    <span class="metric-label">All calls</span>
+    <strong class="metric-value">${number.format(s.overview.totalCalls)}</strong>
+    <p class="metric-help">Every MCP request recorded, including checks and bots.</p>
+  </article>
+  <article class="metric">
+    <span class="metric-label">Good calls</span>
+    <strong class="metric-value">${number.format(s.total.success)}</strong>
+    <p class="metric-help">Successful use by real users. Owner tests are excluded.</p>
+  </article>
+  <article class="metric">
+    <span class="metric-label">Money made</span>
+    <strong class="metric-value">${currency.format(s.overview.revenue)}</strong>
+    <p class="metric-help">Revenue collected since tracking started.</p>
+  </article>
+</section>
 
-<h2>Discovery → tool-call funnel (external; does not itself count as demand)</h2>
-<div class="grid">
-<div class="kpi"><b>${s.funnel.discovery_events}</b><span>discovery/protocol events</span></div>
-<div class="kpi"><b>${s.funnel.discovery_clients}</b><span>discovery/protocol clients</span></div>
-<div class="kpi"><b>${s.funnel.initialize_events}</b><span>non-verifier initialize events</span></div>
-<div class="kpi"><b>${s.funnel.initialize_clients}</b><span>non-verifier initialize clients</span></div>
-<div class="kpi"><b>${s.funnel.tools_list_events}</b><span>non-verifier tools/list events</span></div>
-<div class="kpi"><b>${s.funnel.tools_list_clients}</b><span>non-verifier tools/list clients</span></div>
-<div class="kpi"><b>${s.funnel.external_tools_call_requests}</b><span>genuine external tools/call requests</span></div>
-<div class="kpi"><b>${s.funnel.external_tools_call_clients}</b><span>external tools/call clients</span></div>
-<div class="kpi"><b>${s.funnel.known_tool_invocations}</b><span>actual UpgradeLens tools invoked</span></div>
-<div class="kpi"><b>${s.funnel.known_tool_invocation_clients}</b><span>known-tool invocation clients</span></div>
-<div class="kpi"><b>${s.funnel.successful_business_calls}</b><span>successful organic business calls</span></div>
-<div class="kpi"><b>${s.funnel.genuine_tool_clients}</b><span>genuine tool clients</span></div>
-<div class="kpi"><b>${s.funnel.repeat_genuine_tool_clients}</b><span>repeat genuine tool clients</span></div>
-<div class="kpi"><b>${s.funnel.genuine_keyed_clients}</b><span>stable keyed genuine clients</span></div>
-<div class="kpi"><b>${s.funnel.genuine_anonymous_identities}</b><span>anonymous/IP-derived identities</span></div>
-<div class="kpi"><b>${s.funnel.repeat_keyed_clients}</b><span>repeat stable keyed clients</span></div>
-<div class="kpi"><b>${s.funnel.repeat_anonymous_identities}</b><span>repeat anonymous identities</span></div>
-<div class="kpi"><b>${s.funnel.registry_verification_events}</b><span>registry verification events</span></div>
-<div class="kpi"><b>${s.funnel.auth_verification_events}</b><span>auth verification events</span></div>
-<div class="kpi"><b>${s.funnel.crawler_monitor_events}</b><span>crawler/audit/monitor events</span></div>
-<div class="kpi"><b>${s.funnel.verification_tool_calls}</b><span>verification tool calls excluded</span></div>
-<div class="kpi"><b>${s.funnel.invalid_auth_events}</b><span>invalid-key/auth probes</span></div>
-<div class="kpi"><b>${s.funnel.legacy_unverifiable_events}</b><span>legacy events excluded from business</span></div>
-</div>
-<table><tr><th>Protocol event kind</th><th>events (30d)</th><th>clients</th></tr>${rows(s.byEvent as never, ["event_kind", "calls", "clients"])}</table>
-<h2>Conclusive traffic separation (since reset)</h2>
-<table><tr><th>classification</th><th>traffic class</th><th>event kind</th><th>records</th><th>clients</th><th>known tools</th><th>handler invoked</th><th>semantic successes</th></tr>${rows(s.trafficByClass as never, ["classification_version", "traffic_class", "event_kind", "records", "clients", "known_tools", "invoked", "successes"])}</table>
-<h2>Self-identified verification traffic (30d; excluded)</h2>
-<table><tr><th>User agent</th><th>events</th><th>tool calls</th></tr>${rows(s.verificationAgents as never, ["user_agent", "events", "tool_calls"])}</table>
+<section class="checkpoint" aria-label="Next checkpoint">
+  <p>Next checkpoint<strong>${s.total.success === 0 ? "First good call" : "Early signal"}</strong></p>
+  <div>
+    <div class="progress" role="progressbar" aria-label="Good calls toward early signal" aria-valuemin="0" aria-valuemax="${THRESHOLDS.minimum.calls}" aria-valuenow="${Math.min(s.total.success, THRESHOLDS.minimum.calls)}"><span></span></div>
+    <div class="progress-copy"><span>${number.format(s.total.success)} good calls</span><span>${THRESHOLDS.minimum.calls} needed for early signal</span></div>
+  </div>
+</section>
 
-<h2>Product</h2>
-<div class="grid">
-<div class="kpi"><b>${(s.cacheHitRate * 100).toFixed(0)}%</b><span>cache hit rate</span></div>
-<div class="kpi"><b>${(s.unknownRate * 100).toFixed(1)}%</b><span>unknown-result rate</span></div>
-<div class="kpi"><b>${s.latency.p50}ms</b><span>p50 latency (24h)</span></div>
-<div class="kpi"><b>${s.latency.p95}ms</b><span>p95 latency</span></div>
-<div class="kpi"><b>${s.latency.p99}ms</b><span>p99 latency</span></div>
-</div>
-<table><tr><th>Actual UpgradeLens tool invoked</th><th>successful organic calls (30d)</th></tr>${rows(s.byTool as never, ["tool", "calls"])}</table>
-<h2>Known tool requests by traffic class (since reset)</h2>
-<table><tr><th>Tool</th><th>actor class</th><th>invocation state</th><th>records</th><th>semantic successes</th></tr>${rows(s.byToolClass as never, ["tool", "actor_class", "invocation_state", "records", "successes"])}</table>
-<h2>Most requested packages (30d)</h2>
-<table><tr><th>Package</th><th>calls</th></tr>${rows(s.topPackages as never, ["package", "calls"])}</table>
+<details>
+  <summary>View details</summary>
+  <div class="details-body">
+    <h2>Today</h2>
+    <div class="grid">
+      <div class="kpi"><b>${s.today.success}</b><span>good calls</span></div>
+      <div class="kpi"><b>${s.today.attempts}</b><span>real-user attempts</span></div>
+      <div class="kpi"><b>${s.today.unique}</b><span>real users</span></div>
+      <div class="kpi"><b>${s.today.repeat}</b><span>returning users</span></div>
+      <div class="kpi"><b>${s.today.internal_calls}</b><span>owner/test calls excluded</span></div>
+      <div class="kpi"><b>${errRateToday}%</b><span>unsuccessful result rate</span></div>
+      <div class="kpi"><b>${serviceErrRateToday}%</b><span>service error rate</span></div>
+    </div>
 
-<h2>Thresholds (encoded)</h2>
-<p class="muted">Business state counts only post-cutover, semantically successful external <code>tools/call</code> requests whose exact tool handler ran, after excluding owner/internal tests, invalid auth, legacy rows, and self-identified registry crawlers, audits, scanners, research collectors and health probes. <code>tools/list</code>, initialize, pings, transport checks, unknown tools and verification tool calls never count. A repeat client must succeed on at least two separate UTC days. Anonymous intent is not mathematically provable; “organic” is the conservative operational class with no stored controlled-test or verifier signal.
-Strong signal requires ≥1,000 successful calls/30d, ≥20 stable keyed repeat clients, four completed weeks of positive week-over-week growth, &lt;2% service errors, and &gt;75% measurable gross margin. Monetization-test eligibility is a separate trigger at ≥500 successful calls/30d and ≥10 stable keyed repeat clients; payment activation remains blocked until the payment path is implemented, tested, and explicitly approved.</p>
+    <h2>Last 30 days</h2>
+    <div class="spark">${spark}</div>
+    <div class="grid">
+      <div class="kpi"><b>${s.d30.success}</b><span>good calls</span></div>
+      <div class="kpi"><b>${s.d30.attempts}</b><span>real-user attempts</span></div>
+      <div class="kpi"><b>${s.d30.unique}</b><span>real users</span></div>
+      <div class="kpi"><b>${s.d30.repeat}</b><span>returning users</span></div>
+      <div class="kpi"><b>${s.d30.active3days}</b><span>users active on 3+ days</span></div>
+      <div class="kpi"><b>${currency.format(s.revenue)}</b><span>revenue</span></div>
+      <div class="kpi"><b>${currency.format(s.grossProfit)}</b><span>gross profit</span></div>
+      <div class="kpi"><b>${s.grossMargin === null ? "n/a" : `${(s.grossMargin * 100).toFixed(1)}%`}</b><span>gross margin</span></div>
+    </div>
 
-<h2>System</h2>
-<p class="muted">Version ${c.env.SERVICE_VERSION} · analysis v${c.env.ANALYSIS_VERSION} · generated ${new Date().toISOString()}</p>
-<form method="post" action="/dashboard/logout"><button style="background:none;border:1px solid #232a3d;color:#8b93a7;border-radius:8px;padding:8px 16px;font:inherit;font-size:.85rem">Sign out on this device</button></form>
-</body></html>`);
+    <h2>Traffic breakdown</h2>
+    <div class="grid">
+      <div class="kpi"><b>${s.funnel.discovery_events}</b><span>discovery and setup events</span></div>
+      <div class="kpi"><b>${s.funnel.discovery_clients}</b><span>discovery identities</span></div>
+      <div class="kpi"><b>${s.funnel.initialize_events}</b><span>client connections</span></div>
+      <div class="kpi"><b>${s.funnel.tools_list_events}</b><span>tool-list requests</span></div>
+      <div class="kpi"><b>${s.funnel.external_tools_call_requests}</b><span>real-user tool requests</span></div>
+      <div class="kpi"><b>${s.funnel.known_tool_invocations}</b><span>UpgradeLens tools invoked</span></div>
+      <div class="kpi"><b>${s.funnel.successful_business_calls}</b><span>successful real-user calls</span></div>
+      <div class="kpi"><b>${s.funnel.genuine_tool_clients}</b><span>real users</span></div>
+      <div class="kpi"><b>${s.funnel.repeat_genuine_tool_clients}</b><span>returning users</span></div>
+      <div class="kpi"><b>${s.funnel.registry_verification_events}</b><span>registry checks excluded</span></div>
+      <div class="kpi"><b>${s.funnel.crawler_monitor_events}</b><span>crawler and monitor events</span></div>
+      <div class="kpi"><b>${s.funnel.verification_tool_calls}</b><span>verification calls excluded</span></div>
+      <div class="kpi"><b>${s.funnel.invalid_auth_events}</b><span>invalid authentication checks</span></div>
+      <div class="kpi"><b>${s.funnel.legacy_unverifiable_events}</b><span>older events excluded</span></div>
+    </div>
+    <div class="table-wrap"><table><tr><th>Event</th><th>Events in 30 days</th><th>Identities</th></tr>${rows(s.byEvent as never, ["event_kind", "calls", "clients"])}</table></div>
+    <div class="table-wrap"><table><tr><th>Classification</th><th>Traffic class</th><th>Event</th><th>Records</th><th>Identities</th><th>Known tools</th><th>Invoked</th><th>Successful</th></tr>${rows(s.trafficByClass as never, ["classification_version", "traffic_class", "event_kind", "records", "clients", "known_tools", "invoked", "successes"])}</table></div>
+    <div class="table-wrap"><table><tr><th>Verification source</th><th>Events</th><th>Tool calls</th></tr>${rows(s.verificationAgents as never, ["user_agent", "events", "tool_calls"])}</table></div>
+
+    <h2>Product health</h2>
+    <div class="grid">
+      <div class="kpi"><b>${(s.cacheHitRate * 100).toFixed(0)}%</b><span>cache hit rate</span></div>
+      <div class="kpi"><b>${(s.unknownRate * 100).toFixed(1)}%</b><span>unknown-result rate</span></div>
+      <div class="kpi"><b>${s.latency.p50}ms</b><span>typical latency</span></div>
+      <div class="kpi"><b>${s.latency.p95}ms</b><span>slow-call latency</span></div>
+      <div class="kpi"><b>${s.latency.p99}ms</b><span>slowest-call latency</span></div>
+    </div>
+    <div class="table-wrap"><table><tr><th>Tool</th><th>Successful real-user calls</th></tr>${rows(s.byTool as never, ["tool", "calls"])}</table></div>
+    <div class="table-wrap"><table><tr><th>Tool</th><th>Actor class</th><th>Invocation state</th><th>Records</th><th>Successful</th></tr>${rows(s.byToolClass as never, ["tool", "actor_class", "invocation_state", "records", "successes"])}</table></div>
+    <div class="table-wrap"><table><tr><th>Package</th><th>Calls</th></tr>${rows(s.topPackages as never, ["package", "calls"])}</table></div>
+
+    <h2>How the signal is calculated</h2>
+    <p class="muted">The business signal counts only successful calls made by real external users after the tracking baseline. Owner tests, invalid authentication, old records, registries, crawlers, audits, scanners, research tools, health checks, setup requests, and tool-list requests are excluded. A returning user must succeed on at least two separate days.</p>
+    <p class="muted">Internal status: <strong>${state}</strong>. ${why}</p>
+    <p class="muted">Tracking started ${s.countsResetAt ?? "before a recorded baseline"}. Version ${c.env.SERVICE_VERSION}; analysis ${c.env.ANALYSIS_VERSION}. Payments: ${activation.requested ? "blocked" : "off"}.</p>
+  </div>
+</details>
+
+<footer class="footer">
+  <form method="post" action="/dashboard/logout"><button class="signout">Sign out</button></form>
+  <span>Private owner view</span>
+</footer>
+</main></body></html>`);
 });

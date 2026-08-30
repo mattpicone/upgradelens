@@ -3,6 +3,7 @@ import { businessState, type Stats } from "../src/routes/dashboard";
 
 function stats(overrides: Partial<Stats> = {}): Stats {
   const base: Stats = {
+    overview: { totalCalls: 0, revenue: 0 },
     today: {
       attempts: 0,
       unique: 0,
@@ -73,6 +74,7 @@ function stats(overrides: Partial<Stats> = {}): Stats {
   return {
     ...base,
     ...overrides,
+    overview: { ...base.overview, ...overrides.overview },
     today: { ...base.today, ...overrides.today },
     total: { ...base.total, ...overrides.total },
     d30: { ...base.d30, ...overrides.d30 },
