@@ -24,8 +24,8 @@ or failed.
 - Worker version 0.2.2 is deployed. Browser/Electron Origins now work, CORS
   preflight returns 204, legacy 2025 clients remain supported, and current
   stateless 2026-07-28 discovery/tool envelopes are implemented
-- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.2.1 is
-  published and active; a v0.2.2 manifest is prepared for immutable publish
+- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.2.2 is
+  published and active; the live UI card and API record were verified
 - PulseMCP returns 0 servers. Glama's servers page is absent; connector listing:
   https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens. Cursor,
   Gemini gallery, Claude directory, Smithery, and general search have no live
