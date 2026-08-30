@@ -9,7 +9,7 @@ import { api } from "./routes/api";
 import { meta } from "./routes/meta";
 import { dashboard } from "./routes/dashboard";
 import { admin } from "./routes/admin";
-import { handleMcp } from "./mcp/server";
+import { applyMcpCorsHeaders, handleMcp } from "./mcp/server";
 import {
   identifyCaller,
   checkRateLimit,
@@ -44,10 +44,14 @@ app.use("*", async (c, next) => {
   const metered = path.startsWith("/v1/") || path === "/mcp";
   const dailyMetered = TRACKED_REST_PATHS.has(path) || path.startsWith("/v1/package/");
 
+  // Apply CORS before rate limiting so browser clients can read 4xx responses.
+  // OPTIONS is observable discovery traffic but never consumes the request fuse.
+  if (path === "/mcp") applyMcpCorsHeaders(c);
+
   const caller = await identifyCaller(c.env, c.req.raw);
   c.set("caller", caller);
 
-  if (metered) {
+  if (metered && c.req.method !== "OPTIONS") {
     // request-size guard
     const len = Number(c.req.header("content-length") ?? "0");
     if (len > 32 * 1024) {

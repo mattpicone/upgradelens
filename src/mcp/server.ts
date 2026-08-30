@@ -17,9 +17,73 @@ import type { AppVariables } from "../context";
 import { readJsonBody } from "../http/body";
 import { checkRateLimit } from "../telemetry";
 
-export const MCP_SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
+export const MCP_SUPPORTED_PROTOCOLS = [
+  "2026-07-28",
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+] as const;
 const SUPPORTED_PROTOCOLS: readonly string[] = MCP_SUPPORTED_PROTOCOLS;
-const LATEST_PROTOCOL = "2025-06-18";
+const MODERN_PROTOCOL = "2026-07-28";
+const LATEST_LEGACY_PROTOCOL = "2025-11-25";
+const LEGACY_PROTOCOLS = new Set(["2025-11-25", "2025-06-18", "2025-03-26"]);
+
+const MCP_INSTRUCTIONS =
+  "UpgradeLens answers npm and PyPI upgrade questions with deterministic, source-cited evidence. Call check_dependency_upgrade before editing when both versions are known; use find_safe_upgrade_target only to discover candidates; use plan_dependency_upgrade for review steps. If current_version is unknown, read the project manifest first; if the target is unknown, call find_safe_upgrade_target then check_dependency_upgrade or plan_dependency_upgrade. Edit dependency files only when action_allowed=true. unknown means required evidence or caller context is insufficient.";
+
+const CORS_ALLOWED_HEADERS = [
+  "authorization",
+  "content-type",
+  "mcp-method",
+  "mcp-name",
+  "mcp-protocol-version",
+  "mcp-session-id",
+  "last-event-id",
+].join(", ");
+
+const PUBLIC_MCP_ORIGIN_SCHEMES = new Set([
+  "http:",
+  "https:",
+  "cursor:",
+  "cursor-file:",
+  "tauri:",
+  "vscode-file:",
+  "vscode-webview:",
+]);
+
+/**
+ * This MCP endpoint is a public HTTPS API with no ambient browser credentials:
+ * anonymous access is read-only, and optional credentials are explicit Bearer
+ * headers. Validate that Origin is a real serialized web/app origin, while
+ * allowing any host so browser and Electron MCP clients can connect.
+ */
+export function isValidPublicMcpOrigin(origin: string): boolean {
+  if (origin === "null") return true;
+  try {
+    const parsed = new URL(origin);
+    return PUBLIC_MCP_ORIGIN_SCHEMES.has(parsed.protocol) && Boolean(parsed.host);
+  } catch {
+    return false;
+  }
+}
+
+export function applyMcpCorsHeaders(
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
+): boolean {
+  const origin = c.req.header("origin");
+  if (!origin) return true;
+  if (!isValidPublicMcpOrigin(origin)) return false;
+  c.header("access-control-allow-origin", origin);
+  c.header("access-control-allow-methods", "POST, OPTIONS");
+  c.header("access-control-allow-headers", CORS_ALLOWED_HEADERS);
+  c.header(
+    "access-control-expose-headers",
+    "mcp-protocol-version, mcp-session-id, x-request-id, x-ratelimit-remaining-day",
+  );
+  c.header("access-control-max-age", "86400");
+  c.header("vary", "Origin");
+  return true;
+}
 
 const CHECK_INPUT_SCHEMA = {
   type: "object",
@@ -280,12 +344,80 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+interface ModernRequestMeta {
+  "io.modelcontextprotocol/protocolVersion"?: unknown;
+  "io.modelcontextprotocol/clientInfo"?: { name?: unknown; version?: unknown };
+  "io.modelcontextprotocol/clientCapabilities"?: unknown;
+}
+
 function rpcResult(id: number | string | null, result: unknown) {
   return { jsonrpc: "2.0" as const, id, result };
 }
 
 function rpcError(id: number | string | null, code: number, message: string, data?: unknown) {
   return { jsonrpc: "2.0" as const, id, error: { code, message, ...(data !== undefined ? { data } : {}) } };
+}
+
+function completeResult<T extends Record<string, unknown>>(result: T, modern: boolean) {
+  return modern ? { resultType: "complete" as const, ...result } : result;
+}
+
+function decodeMirroredHeader(value: string): string | null {
+  if (!value.startsWith("=?base64?") || !value.endsWith("?=")) return value;
+  try {
+    const binary = atob(value.slice(9, -2));
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function modernHeaderError(
+  msg: JsonRpcRequest,
+  message: string,
+): { response: ReturnType<typeof rpcError>; status: 400 } {
+  return { response: rpcError(msg.id ?? null, -32020, message), status: 400 };
+}
+
+function validateModernRequestHeaders(
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
+  msg: JsonRpcRequest,
+): { response: ReturnType<typeof rpcError>; status: 400 } | null {
+  const meta = msg.params?._meta as ModernRequestMeta | undefined;
+  if (meta?.["io.modelcontextprotocol/protocolVersion"] !== MODERN_PROTOCOL) {
+    return modernHeaderError(
+      msg,
+      "Header mismatch: MCP-Protocol-Version must match params._meta protocolVersion.",
+    );
+  }
+  if (
+    !meta["io.modelcontextprotocol/clientInfo"] ||
+    typeof meta["io.modelcontextprotocol/clientCapabilities"] !== "object"
+  ) {
+    return modernHeaderError(msg, "Missing required per-request client metadata.");
+  }
+  const methodHeader = c.req.header("mcp-method");
+  if (methodHeader !== msg.method) {
+    return modernHeaderError(msg, "Header mismatch: Mcp-Method does not match the request body.");
+  }
+  const nameSource =
+    msg.method === "tools/call" || msg.method === "prompts/get"
+      ? msg.params?.name
+      : msg.method === "resources/read"
+        ? msg.params?.uri
+        : undefined;
+  if (nameSource !== undefined) {
+    const nameHeader = c.req.header("mcp-name");
+    if (
+      typeof nameSource !== "string" ||
+      !nameHeader ||
+      decodeMirroredHeader(nameHeader) !== nameSource
+    ) {
+      return modernHeaderError(msg, "Header mismatch: Mcp-Name does not match the request body.");
+    }
+  }
+  return null;
 }
 
 async function callTool(
@@ -345,6 +477,7 @@ async function handleMessage(
   env: Env,
   msg: JsonRpcRequest,
   setTool: (t: string) => void,
+  modern: boolean,
 ): Promise<unknown | null> {
   const id = msg.id ?? null;
   // Notifications get no response.
@@ -352,10 +485,10 @@ async function handleMessage(
 
   switch (msg.method) {
     case "initialize": {
-      const requested = (msg.params?.protocolVersion as string) ?? LATEST_PROTOCOL;
-      const protocolVersion = SUPPORTED_PROTOCOLS.includes(requested)
+      const requested = (msg.params?.protocolVersion as string) ?? LATEST_LEGACY_PROTOCOL;
+      const protocolVersion = LEGACY_PROTOCOLS.has(requested)
         ? requested
-        : LATEST_PROTOCOL;
+        : LATEST_LEGACY_PROTOCOL;
       return rpcResult(id, {
         protocolVersion,
         capabilities: { tools: { listChanged: false } },
@@ -364,29 +497,60 @@ async function handleMessage(
           title: "UpgradeLens — dependency upgrade intelligence",
           version: env.SERVICE_VERSION,
         },
-        instructions:
-          "UpgradeLens answers npm and PyPI upgrade questions with deterministic, source-cited evidence. Call check_dependency_upgrade before editing when both versions are known; use find_safe_upgrade_target only to discover candidates; use plan_dependency_upgrade for review steps. If current_version is unknown, read the project manifest first; if the target is unknown, call find_safe_upgrade_target then check_dependency_upgrade or plan_dependency_upgrade. Edit dependency files only when action_allowed=true. unknown means required evidence or caller context is insufficient.",
+        instructions: MCP_INSTRUCTIONS,
       });
     }
+    case "server/discover":
+      return rpcResult(
+        id,
+        completeResult(
+          {
+            supportedVersions: [...MCP_SUPPORTED_PROTOCOLS],
+            capabilities: { tools: { listChanged: false } },
+            _meta: {
+              "io.modelcontextprotocol/serverInfo": {
+                name: "upgradelens",
+                version: env.SERVICE_VERSION,
+              },
+            },
+            instructions: MCP_INSTRUCTIONS,
+            ttlMs: 3_600_000,
+            cacheScope: "public",
+          },
+          modern,
+        ),
+      );
     case "ping":
-      return rpcResult(id, {});
+      return rpcResult(id, completeResult({}, modern));
     case "tools/list":
-      return rpcResult(id, { tools: MCP_TOOLS });
+      return rpcResult(
+        id,
+        completeResult(
+          { tools: MCP_TOOLS, ...(modern ? { ttlMs: 3_600_000, cacheScope: "public" } : {}) },
+          modern,
+        ),
+      );
     case "tools/call": {
       const name = (msg.params?.name as string) ?? "";
       const args = (msg.params?.arguments as Record<string, unknown>) ?? {};
       setTool(name);
       const { structured, isError } = await callTool(env, name, args);
-      return rpcResult(id, {
-        content: [{ type: "text", text: JSON.stringify(structured) }],
-        structuredContent: structured,
-        isError,
-      });
+      return rpcResult(
+        id,
+        completeResult(
+          {
+            content: [{ type: "text", text: JSON.stringify(structured) }],
+            structuredContent: structured,
+            isError,
+          },
+          modern,
+        ),
+      );
     }
     case "resources/list":
-      return rpcResult(id, { resources: [] });
+      return rpcResult(id, completeResult({ resources: [] }, modern));
     case "prompts/list":
-      return rpcResult(id, { prompts: [] });
+      return rpcResult(id, completeResult({ prompts: [] }, modern));
     default:
       if (msg.id === undefined) return null; // unknown notification
       return rpcError(id, -32601, `Method not found: ${msg.method}`);
@@ -397,29 +561,20 @@ export async function handleMcp(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
 ): Promise<Response> {
   c.set("mcpMethod", `http:${c.req.method.toLowerCase()}`);
+  if (!applyMcpCorsHeaders(c)) {
+    c.set("mcpErrorKind", "origin_rejected");
+    c.set("mcpRpcErrorCode", -32600);
+    return c.json(rpcError(null, -32600, "Origin is not a valid public client origin."), 403);
+  }
+  if (c.req.method === "OPTIONS") {
+    return c.body(null, 204, { Allow: "POST, OPTIONS" });
+  }
   if (c.req.method !== "POST") {
     // Stateless server: no server-initiated streams, no sessions to delete.
-    return c.body(null, 405, { Allow: "POST" });
-  }
-  const origin = c.req.header("origin");
-  if (origin) {
-    const configured = (c.env.ALLOWED_ORIGINS ?? c.env.PUBLIC_BASE_URL)
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (!configured.includes(origin)) {
-      c.set("mcpErrorKind", "origin_rejected");
-      c.set("mcpRpcErrorCode", -32600);
-      return c.json(rpcError(null, -32600, "Origin is not allowed."), 403);
-    }
+    return c.body(null, 405, { Allow: "POST, OPTIONS" });
   }
   const protocolHeader = c.req.header("mcp-protocol-version");
   if (protocolHeader) c.set("mcpProtocolVersion", protocolHeader);
-  if (protocolHeader && !SUPPORTED_PROTOCOLS.includes(protocolHeader)) {
-    c.set("mcpErrorKind", "unsupported_protocol_version");
-    c.set("mcpRpcErrorCode", -32600);
-    return c.json(rpcError(null, -32600, `Unsupported MCP-Protocol-Version: ${protocolHeader}`), 400);
-  }
 
   const parsed = await readJsonBody(c.req.raw);
   if (!parsed.ok) {
@@ -442,6 +597,30 @@ export async function handleMcp(
     return c.json(rpcError(null, -32600, "Invalid JSON-RPC message."), 400);
   }
   c.set("mcpMethod", msg.method);
+  if (protocolHeader && !SUPPORTED_PROTOCOLS.includes(protocolHeader)) {
+    c.set("mcpErrorKind", "unsupported_protocol_version");
+    c.set("mcpRpcErrorCode", -32022);
+    return c.json(
+      rpcError(msg.id ?? null, -32022, "Unsupported protocol version", {
+        supported: [...MCP_SUPPORTED_PROTOCOLS],
+        requested: protocolHeader,
+      }),
+      400,
+    );
+  }
+  const modern = protocolHeader === MODERN_PROTOCOL;
+  if (modern) {
+    const validation = validateModernRequestHeaders(c, msg);
+    if (validation) {
+      c.set("mcpErrorKind", "header_mismatch");
+      c.set("mcpRpcErrorCode", -32020);
+      return c.json(validation.response, validation.status);
+    }
+    const meta = msg.params?._meta as ModernRequestMeta;
+    const clientInfo = meta["io.modelcontextprotocol/clientInfo"];
+    if (typeof clientInfo?.name === "string") c.set("mcpClientName", clientInfo.name);
+    if (typeof clientInfo?.version === "string") c.set("mcpClientVersion", clientInfo.version);
+  }
   if (msg.method === "initialize") {
     if (typeof msg.params?.protocolVersion === "string") {
       c.set("mcpProtocolVersion", msg.params.protocolVersion);
@@ -470,7 +649,7 @@ export async function handleMcp(
     }
     c.set("mcpToolInvoked", knownTool);
   }
-  const response = await handleMessage(c.env, msg, setTool);
+  const response = await handleMessage(c.env, msg, setTool, modern);
   if (response === null) return c.body(null, 202);
   const rpc = response as {
     result?: { isError?: boolean; structuredContent?: unknown };
@@ -503,5 +682,6 @@ export async function handleMcp(
       c.set("unknownResult", structured.decision === "unknown");
     }
   }
-  return c.json(response as object);
+  const status = modern && rpc.error?.code === -32601 ? 404 : 200;
+  return c.json(response as object, status);
 }

@@ -1,6 +1,6 @@
 {
   "name": "upgradelens",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Evidence-backed dependency upgrade intelligence for AI coding agents. REST API + remote MCP server.",
   "type": "module",

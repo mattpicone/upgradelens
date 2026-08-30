@@ -16,17 +16,20 @@ and exactly what remains.
 | Surface | Status | Notes |
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens. Topics include `mcp`, `mcp-server`, `gemini-cli-extension`, and `agent-plugins`. Release `distribution-2026-08-29` exists from the existing tag |
-| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Published as `io.github.mattpicone/upgradelens`; the v0.2.x manifest adds agent-safe action gating, output schemas and read-only/idempotent annotations. Republish via the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no credentials needed) |
-| Gemini CLI extension gallery | READY | Root `gemini-extension.json` and `GEMINI.md` are checked in; `gemini-cli-extension` topic is set; immutable `distribution-2026-08-29` tag and GitHub Release exist. Do not claim a live gallery listing until a gallery URL exists |
-| Agent Plugins 1.0 | READY | Root `plugin.json` and `mcp.json` conform to the portable 1.0 layout and contain no credentials. The `agent-plugins` topic is set. Maintainer-directory submission remains review-gated |
+| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | Live card verified 2026-08-30 at https://registry.modelcontextprotocol.io/ as `io.github.mattpicone/upgradelens` v0.2.1. The API returns both published versions (0.1.0 and 0.2.1) active. v0.2.2 publication uses the `Publish to MCP Registry` GitHub Actions workflow (OIDC, no stored registry credential) |
+| Codex CLI / desktop | DONE (direct install) | Personally executed `codex mcp add upgradelens --url https://upgradelens.mattpicone.workers.dev/mcp --bearer-token-env-var OWNER_TOKEN` with Codex `0.150.0-alpha.8`. `codex mcp list` showed enabled streamable HTTP/Bearer auth; an ephemeral read-only Codex task discovered and called `check_dependency_upgrade`, receiving `review_required`, `action_allowed=false`, confidence 0.95 and four evidence records. Owner auth kept the call internal |
+| Claude Code | READY (direct install) | Current official command is `claude mcp add --transport http upgradelens https://upgradelens.mattpicone.workers.dev/mcp`. Claude CLI is not installed on this host. The Claude Connectors Directory has no UpgradeLens result; directory submission is account/review-gated at https://claude.ai/settings/plugins/submit |
+| Gemini CLI extension gallery | NOT INDEXED | Root `gemini-extension.json` and `GEMINI.md` are checked in, the `gemini-cli-extension` topic is set, and direct GitHub install is supported. Live gallery search on 2026-08-30 did not render an UpgradeLens result. Gemini documents a daily crawler of tagged public repos; do not claim a listing until a gallery card exists |
+| GitHub Copilot Agent Plugins | READY (direct install) | Root `plugin.json` and new root `.mcp.json` match Copilot's Agent Plugin layout and contain no credentials; direct command is `copilot plugin install mattpicone/upgradelens`. Copilot CLI is not installed on this host. The portable `mcp.json` remains for other Agent Plugins clients |
 | llms.txt + OpenAPI + pricing.json | DONE | Live at https://upgradelens.mattpicone.workers.dev (`/llms.txt`, `/openapi.json`, `/pricing.json`) |
 | Worker discovery docs | DONE | Live on the Worker host: `/mcp.json`, `/server.json`, `/.well-known/mcp/server-card.json`, `/.well-known/mcp.json`. `/llms.txt` includes the when / do-not-use tool table |
-| PulseMCP | NOT INDEXED | **Rejected / form closed** 2026-08-29. https://www.pulsemcp.com/submit still shows the mid-August pause: "submissions and changes are temporarily paused." Search `?q=upgradelens` returns 0 servers. One check, then stopped. No listing URL. Official-registry auto-index has not produced a listing |
-| Glama MCP directory | PARTIAL | **Servers listing pending.** https://glama.ai/mcp/servers/mattpicone/upgradelens is 404. **Add Server** on https://glama.ai/mcp/servers opens a Sign Up modal (Google/GitHub); add/claim cannot finish without owner login. **Connector listing accepted** via official-registry ingest: https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens (unclaimed, status "Not tested"). Do not treat the servers directory as DONE |
-| Smithery | LATER | Focused on hosted/stdio servers; add if remote listings show traction |
-| Anthropic Connectors Directory | READY (human-gated) | Submission requires the account owner to accept terms. Draft below |
+| PulseMCP | NOT INDEXED | Re-verified 2026-08-30: https://www.pulsemcp.com/servers?q=upgradelens reports 0 servers and the submission pause banner remains. No resubmission attempted |
+| Glama MCP directory | PARTIAL | Re-verified 2026-08-30: https://glama.ai/mcp/servers/mattpicone/upgradelens explicitly says it has no such server. The official-registry-ingested connector is live at https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens, unclaimed and "Not tested." Claim is gated by Glama sign-in; no duplicate submission attempted |
+| Smithery | READY (human-gated) | Live search `https://smithery.ai/servers?q=upgradelens` has no exact UpgradeLens result. Publish → MCP redirects to Smithery account authentication (email, Google, or GitHub) before `/servers/new`; no submission was made |
+| Anthropic Connectors Directory | READY (human-gated) | No UpgradeLens result on https://claude.com/connectors. Submission requires an authenticated owner/review flow. Draft below |
 | OpenAI Apps SDK directory | LATER | Requires app packaging beyond an MCP tool server; revisit after usage signal |
-| Cursor discovery | DOCS ONLY | README one-click `cursor.com/install-mcp` link, landing-page snippets, and `examples/cursor/.cursor/mcp.json`. Not a Cursor Marketplace listing. **Skipped 2026-08-29:** no free public add form — https://cursor.directory/mcp/new redirects to login `?next=/plugins/new` |
+| Cursor discovery | DOCS ONLY | Current Cursor supports project/global remote MCP JSON, Agent Plugins, and `cursor.com/install-mcp` / `cursor://` installers. README one-click install and `examples/cursor/.cursor/mcp.json` are ready. Live marketplace search on 2026-08-30 returned no UpgradeLens result; https://cursor.com/marketplace/publish shows "Sign in to apply." https://cursor.directory/plugins/upgradelens is 404 and submission is sign-in-gated. Cursor is not installed on this Codex host, so no Cursor client call was claimed |
+| General web search | NOT INDEXED | Exact searches for `"UpgradeLens" MCP server` and `"UpgradeLens" "MCP"` did not surface the product/repo in general results on 2026-08-30. The official registry and direct GitHub URL remain the only useful discovery paths |
 | x402 Bazaar / Agentic.Market | LATER | Only relevant after paid-intent gates are met and a verified payment implementation exists |
 | npm/PyPI thin client packages | LATER | Only if genuine usage suggests installation friction |
 
@@ -44,10 +47,13 @@ and exactly what remains.
 
 1. ~~Publish registry entry~~ DONE via `Publish to MCP Registry` workflow (2026-08-28).
 2. ~~Prepare free discovery packages~~ DONE: Gemini extension, Agent Plugins 1.0 manifests, install docs, and immutable distribution tag.
-3. Directory submissions (one each, 2026-08-29), after Worker discovery docs were live:
+3. Directory submissions/checks (one each; re-verified 2026-08-30), after Worker discovery docs were live:
    - PulseMCP: **rejected / form closed**. Pause banner still up; 0 search hits. Stopped.
    - Glama: **pending** add/claim (Sign Up wall). Connector URL accepted (registry ingest): https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens. Servers path still 404.
-   - cursor.directory: **skipped** — no free public add form (login-gated plugin submit only).
+   - Smithery: **not listed**; Publish → MCP requires account authentication.
+   - Cursor Marketplace / cursor.directory: **not listed**; both submissions are login-gated.
+   - Anthropic Connectors Directory: **not listed**; submission is owner/account/review-gated.
    Never claim DONE without a live listing URL. Do not resubmit unless a form reopens.
 4. ~~Add `gemini-cli-extension` and `agent-plugins` GitHub topics~~ DONE 2026-08-29. Gallery/directory listing is still a separate crawl — do not claim DONE on those surfaces without a live URL.
-5. Run three $0 discovery experiments one at a time: registry listing copy, ecosystem-specific GitHub examples, then directory submissions. Accept an experiment only if attributed successful tool calls include at least 3 independent clients and at least 1 returning client; ignore handshakes, scans, keys and owner traffic.
+5. ~~Prove one real client path~~ DONE 2026-08-30 with Codex install + discovery + owner-tagged tool call.
+6. Run three $0 discovery experiments one at a time: registry listing copy, ecosystem-specific GitHub examples, then directory submissions. Accept an experiment only if attributed successful tool calls include at least 3 independent clients and at least 1 returning client; ignore handshakes, scans, keys and owner traffic.

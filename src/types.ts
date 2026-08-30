@@ -4,7 +4,6 @@ export interface Env {
   SERVICE_VERSION: string;
   PAYMENTS_ENABLED: string;
   PUBLIC_BASE_URL: string;
-  ALLOWED_ORIGINS?: string;
   X402_PAY_TO?: string;
   ANON_RATE_LIMITER?: RateLimit;
   KEY_RATE_LIMITER?: RateLimit;

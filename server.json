@@ -3,7 +3,7 @@
   "name": "io.github.mattpicone/upgradelens",
   "title": "UpgradeLens",
   "description": "npm/PyPI dependency upgrade intelligence: OSV/CVE, breaking changes, EOL, runtime compat.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "websiteUrl": "https://upgradelens.mattpicone.workers.dev",
   "repository": {
     "url": "https://github.com/mattpicone/upgradelens",

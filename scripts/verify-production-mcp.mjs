@@ -58,7 +58,7 @@ async function mcp(method, params = {}) {
     headers: {
       authorization: `Bearer ${OWNER_TOKEN}`,
       "content-type": "application/json",
-      "mcp-protocol-version": "2025-06-18",
+      "mcp-protocol-version": "2025-11-25",
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
   });
@@ -68,7 +68,7 @@ async function mcp(method, params = {}) {
 }
 
 const initialized = await mcp("initialize", {
-  protocolVersion: "2025-06-18",
+  protocolVersion: "2025-11-25",
   capabilities: {},
   clientInfo: { name: "upgradelens-owner-verifier", version: "1.0" },
 });

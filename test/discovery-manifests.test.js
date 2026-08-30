@@ -35,6 +35,16 @@ describe("free discovery manifests", () => {
     expect(JSON.stringify({ plugin, mcp })).not.toMatch(/authorization|bearer|api[_-]?key|secret/i);
   });
 
+  it("provides the native GitHub Copilot CLI plugin MCP filename and fields", () => {
+    const mcp = readJson(".mcp.json");
+    expect(mcp.mcpServers.upgradelens).toEqual({
+      type: "http",
+      url: PRODUCTION_MCP,
+      tools: ["*"],
+    });
+    expect(JSON.stringify(mcp)).not.toMatch(/authorization|bearer|api[_-]?key|secret/i);
+  });
+
   it("keeps Worker discovery paths, endpoint URL, and the three tool names from drifting", async () => {
     const env = fakeEnv();
     const base = env.PUBLIC_BASE_URL;

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "upgradelens": {
+      "type": "http",
+      "url": "https://upgradelens.mattpicone.workers.dev/mcp",
+      "tools": ["*"]
+    }
+  }
+}

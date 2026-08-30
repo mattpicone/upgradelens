@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 — 2026-08-30
+
+Remote-client compatibility and install-path release.
+
+- Enabled validated public web/Electron Origins and correct CORS preflight for the public read-only HTTPS MCP endpoint.
+- Added current stateless MCP 2026-07-28 discovery, per-request metadata/header validation, complete-result envelopes, and structured unsupported-version negotiation while preserving 2025 clients.
+- Added Copilot's root `.mcp.json`, refreshed all manifest versions, and documented verified Codex/Cursor/Claude/Gemini/Copilot install and listing status.
+- Proved a real Codex install, tool discovery, and owner-tagged tool call against production without changing genuine-business counters.
+
 ## 0.2.1 — 2026-08-29
 
 Release-note evidence precision fix.

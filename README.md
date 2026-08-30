@@ -45,11 +45,23 @@ claude mcp add --transport http upgradelens https://upgradelens.mattpicone.worke
 
 ### Codex CLI
 
+```bash
+codex mcp add upgradelens --url https://upgradelens.mattpicone.workers.dev/mcp
+```
+
+Or configure it directly:
+
 ```toml
 # ~/.codex/config.toml
 [mcp_servers.upgradelens]
 url = "https://upgradelens.mattpicone.workers.dev/mcp"
 ```
+
+The CLI install path was verified end-to-end on 2026-08-30 with Codex
+`0.150.0-alpha.8`: enabled connection, tool discovery, and a real
+`check_dependency_upgrade` call. The verification used an environment-backed
+owner Bearer token so it could not count as business demand; public evaluation
+installs need no token.
 
 ### Gemini CLI
 
@@ -63,11 +75,16 @@ The Gemini extension gallery indexes public repos that have the
 `gemini-cli-extension` GitHub topic. That topic is set on this repository;
 gallery listing is a separate crawl and is not claimed here.
 
-### Agent Plugins (Copilot and compatible clients)
+### GitHub Copilot Agent Plugins
 
-Portable Agent Plugins 1.0 `plugin.json` and `mcp.json` are in the repo root.
-No credential is embedded. Maintainer-directory indexing is separate from these
-files.
+```bash
+copilot plugin install mattpicone/upgradelens
+```
+
+Portable Agent Plugins 1.0 `plugin.json` plus Copilot's root `.mcp.json` are
+checked in and point at the remote HTTPS server. The existing `mcp.json` remains
+for other Agent Plugins-compatible clients. No credential is embedded.
+Maintainer-directory indexing is separate from these files.
 
 ### Microsoft APM
 
