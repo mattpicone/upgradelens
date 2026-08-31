@@ -2,9 +2,11 @@
 
 Updated 2026-08-31.
 
-> UpgradeLens v0.3 is deployed. The additive D1 migration, public Worker
-> health/OpenAPI/pricing checks, GitHub CI, and official Registry publication
-> all passed. Paid settlement and Bazaar indexing remain external gates.
+> The preceding UpgradeLens v0.3.1 build is deployed. The additive D1
+> migration, public Worker health/OpenAPI/pricing checks, GitHub CI, and
+> official Registry publication all passed. The current local hardening is
+> ready but awaits deployment; paid settlement and Bazaar indexing remain
+> external gates.
 
 ## Current conclusion
 
@@ -25,9 +27,10 @@ or failed.
   is intentionally skipped unless facilitator credentials are supplied).
 - The complete migration chain and idempotent v0.3 migration pass against a
   fresh SQLite database, including atomic trial delivery and stored fee data.
-- The public Worker and official Registry both passed exact v0.3.1 verification.
-  v0.3.1 is a metadata-only contract patch that improves brandless capability ranking;
-  the API, price, payment state machine, and revenue rules are unchanged.
+- The preceding deployed Worker and official Registry both passed exact v0.3.1
+  verification. The current local v0.3.1 hardening adds isolated testnet
+  identities, exact receipt/replay checks, and strict Bazaar REST/MCP
+  acceptance; it is not yet live.
 - The Worker uses a Worker-native CDP facilitator client; the live no-payment
   probe returns the exact Base Sepolia x402 v2 challenge without executing a
   business call or moving funds.
@@ -46,7 +49,7 @@ or failed.
 - `counts_reset_at`: `2026-08-29T19:57:23.228Z` — do not reset again
 - Owner-tagged MCP traffic is classified `internal` and does not increment
   business counters
-- Worker version 0.3.1 is deployed. Browser/Electron Origins work, CORS
+- The preceding Worker version 0.3.1 is deployed. Browser/Electron Origins work, CORS
   preflight returns 204, legacy 2025 clients remain supported, and current
   stateless 2026-07-28 discovery/tool envelopes are implemented
 - Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.3.1 is
