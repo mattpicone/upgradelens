@@ -25,8 +25,8 @@ or failed.
   is intentionally skipped unless facilitator credentials are supplied).
 - The complete migration chain and idempotent v0.3 migration pass against a
   fresh SQLite database, including atomic trial delivery and stored fee data.
-- The public Worker and official Registry both passed exact v0.3 verification.
-  v0.3.1 is a metadata-only patch that improves brandless capability ranking;
+- The public Worker and official Registry both passed exact v0.3.1 verification.
+  v0.3.1 is a metadata-only contract patch that improves brandless capability ranking;
   the API, price, payment state machine, and revenue rules are unchanged.
 - The Worker uses a Worker-native CDP facilitator client; the live no-payment
   probe returns the exact Base Sepolia x402 v2 challenge without executing a
