@@ -1,4 +1,3 @@
-import { createCdpFacilitatorClient } from "@coinbase/cdp-sdk/x402";
 import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader } from "@x402/core/http";
 import { x402ResourceServer } from "@x402/core/server";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from "@x402/core/types";
@@ -30,6 +29,7 @@ import {
 import { MachineError, machineError, type MachineErrorBody } from "./errors";
 import type { BillingMetadata, Env } from "./types";
 import type { CallerIdentity } from "./telemetry";
+import { createCdpFacilitatorClient } from "./cdp-facilitator";
 
 type LogicalOperation = OperationName | "batch_check_upgrades";
 

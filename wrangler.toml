@@ -8,9 +8,6 @@ compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-[alias]
-"uncrypto" = "./src/uncrypto-worker.ts"
-
 [observability]
 enabled = true
 
