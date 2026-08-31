@@ -39,8 +39,13 @@ function sqliteD1() {
         return statement.runSync();
       },
       runSync() {
-        const result = sqlite.prepare(sql).run(...args);
-        return { results: [], success: true, meta: { changes: Number(result.changes) } };
+        // Production D1 reports trigger-written rows in meta.changes, unlike
+        // sqlite3_changes(). Use the total_changes() delta so the mock matches
+        // the deployed behavior (e.g. trial_delivery_after_consume).
+        const before = sqlite.prepare("SELECT total_changes() AS n").get().n;
+        sqlite.prepare(sql).run(...args);
+        const after = sqlite.prepare("SELECT total_changes() AS n").get().n;
+        return { results: [], success: true, meta: { changes: Number(after - before) } };
       },
       async raw() {
         return sqlite.prepare(sql).all(...args).map((row) => Object.values(row));

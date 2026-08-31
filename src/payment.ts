@@ -668,7 +668,10 @@ async function runFree<T extends object>(
         `UPDATE trial_entitlements SET consumed_at=?, reserved_by=NULL, reserved_at=NULL, updated_at=?
          WHERE subject_hash=? AND reserved_by=?`,
       ).bind(now, now, input.caller.trialSubject ?? input.caller.clientKey, input.requestId).run();
-      if (Number(consumption.meta?.changes ?? 0) !== 1) {
+      // Production D1 includes rows written by the delivery trigger in
+      // meta.changes, so a successful consume reports 1 or 2. Only a zero
+      // count means the lease was lost before consumption.
+      if (Number(consumption.meta?.changes ?? 0) < 1) {
         await input.env.DB.prepare(
           `UPDATE business_calls SET execution_state='failed', delivery_state='withheld', updated_at=?
            WHERE id=? AND delivery_state='withheld'`,
