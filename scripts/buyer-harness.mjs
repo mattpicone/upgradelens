@@ -82,7 +82,7 @@ function matchingBazaarEntry(entry) {
   const requirement = accepts[0];
   if (
     acceptanceToolNames.includes(toolName) &&
-    serviceName === "UpgradeLens" &&
+    (serviceName == null || serviceName === "UpgradeLens") &&
     resourceUrl === advertisedMcpResourceUrl(toolName) &&
     required?.x402Version === 2 &&
     accepts.length === 1 &&
@@ -498,10 +498,11 @@ if (ranked.length === 0) {
         // Bazaar learns a resource from the PaymentRequired extension, so the
         // acceptance run must settle first and then allow a short indexing
         // window before requiring brandless discovery.
-        const bazaarAttempts = Math.max(1, Math.min(12, Number(process.env.BAZAAR_ACCEPTANCE_ATTEMPTS || 6)));
+        const bazaarAttempts = Math.max(1, Math.min(24, Number(process.env.BAZAAR_ACCEPTANCE_ATTEMPTS || 12)));
+        const bazaarIntervalMs = Math.max(1000, Math.min(60_000, Number(process.env.BAZAAR_ACCEPTANCE_INTERVAL_MS || 15_000)));
         let indexedBazaar = null;
         for (let attempt = 0; attempt < bazaarAttempts; attempt += 1) {
-          if (attempt > 0) await sleep(5000);
+          if (attempt > 0) await sleep(bazaarIntervalMs);
           indexedBazaar = await queryBazaarMcp();
           if (indexedBazaar.ok && indexedBazaar.matched_tools?.length === acceptanceToolNames.length) break;
         }

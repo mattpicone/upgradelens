@@ -23,6 +23,7 @@ import {
   networkForMode,
   knownUnitCostMicros,
   mcpToolResourceUrl,
+  isMcpPaymentResource,
   operationByName,
   paymentMode,
   type OperationName,
@@ -439,7 +440,7 @@ function mcpDiscovery(operation: LogicalOperation): Record<string, unknown> {
 }
 
 function bazaarDiscovery(input: ExecutionInput<Record<string, unknown>>): Record<string, unknown> {
-  if (input.resource.startsWith("mcp://")) return mcpDiscovery(input.operation);
+  if (isMcpPaymentResource(input.resource)) return mcpDiscovery(input.operation);
   const entry = operationByName(input.operation);
   const declaration = declareDiscoveryExtension({
     bodyType: "json",

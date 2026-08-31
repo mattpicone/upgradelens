@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { CONTRACT_VERSION, MCP_TOOLS, OPERATION_CATALOG, mcpToolResourceUrl, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
+import { CONTRACT_VERSION, MCP_TOOLS, OPERATION_CATALOG, isMcpPaymentResource, mcpToolResourceUrl, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
 import { fakeEnv } from "./helpers";
 import { deriveTrialSubject } from "../src/telemetry";
 import { paymentActivation } from "../src/payment";
@@ -17,6 +17,8 @@ describe("v0.3 machine contract", () => {
     expect(mcpToolResourceUrl("https://upgradelens.test/", "check_dependency_upgrade")).toBe(
       "https://upgradelens.test/mcp#check_dependency_upgrade",
     );
+    expect(isMcpPaymentResource("https://upgradelens.test/mcp#check_dependency_upgrade")).toBe(true);
+    expect(isMcpPaymentResource("https://upgradelens.test/v1/upgrade/check")).toBe(false);
     const openapi = openApiDocument(fakeEnv());
     expect(openapi.info.version).toBe(CONTRACT_VERSION);
     expect(Object.keys(openapi.paths)).toEqual(expect.arrayContaining([

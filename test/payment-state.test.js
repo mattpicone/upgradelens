@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { BASE_USDC, BASE_SEPOLIA_USDC } from "../src/contract.ts";
+import { BASE_USDC, BASE_SEPOLIA_USDC, mcpToolResourceUrl } from "../src/contract.ts";
 import { executeAnalysis, reconcilePendingPayments } from "../src/payment.ts";
 
 const RESOURCE = "https://upgradelens.test/v1/upgrade/check";
@@ -441,6 +441,25 @@ describe("paid authorization validation", () => {
     expect(runtime.state).toMatchObject({ verifies: 0, settles: 0 });
     expect(sqlite.prepare("SELECT COUNT(*) AS count FROM payment_attempts").get().count).toBe(0);
     expect(sqlite.prepare("SELECT COUNT(*) AS count FROM payment_events").get().count).toBe(0);
+  });
+
+  it("declares MCP Bazaar metadata for HTTPS MCP resource URLs", async () => {
+    const { env } = fixture();
+    const runtime = runtimeFixture();
+    const resource = mcpToolResourceUrl(env.PUBLIC_BASE_URL, "check_dependency_upgrade");
+    const outcome = await executeAnalysis({
+      ...paidInput(env, runtime.runtime, { paymentPayload: null }),
+      resource,
+      forcePayment: true,
+    });
+
+    expect(outcome.kind).toBe("payment_required");
+    expect(outcome.paymentRequired.resource.url).toBe(resource);
+    expect(outcome.paymentRequired.extensions.bazaar.info.input).toMatchObject({
+      type: "mcp",
+      toolName: "check_dependency_upgrade",
+      transport: "streamable-http",
+    });
   });
 
   it("rejects missing identifiers and wrong versions, networks, assets, amounts, recipients, and resources", async () => {

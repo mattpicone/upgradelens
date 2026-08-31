@@ -395,6 +395,10 @@ export function mcpToolResourceUrl(baseUrl: string, toolName: string): string {
   return `${new URL(baseUrl).origin}/mcp#${toolName}`;
 }
 
+export function isMcpPaymentResource(resource: string): boolean {
+  return resource.startsWith("mcp://") || /\/mcp#/.test(resource);
+}
+
 export function registryMetadata(env: Env) {
   return {
     $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
