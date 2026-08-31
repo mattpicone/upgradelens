@@ -18,9 +18,9 @@ function acceptance(overrides = {}) {
     idempotent_retry: { payment_status: "cached_settlement", same_transaction: true },
     replay_rejection: { code: "payment_replay", handler_not_reexecuted: true },
     payment_challenges: [
-      { tool: "check_dependency_upgrade", resource: "mcp://tool/check_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
-      { tool: "find_safe_upgrade_target", resource: "mcp://tool/find_safe_upgrade_target", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
-      { tool: "plan_dependency_upgrade", resource: "mcp://tool/plan_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+      { tool: "check_dependency_upgrade", resource: "https://upgradelens.mattpicone.workers.dev/mcp#check_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+      { tool: "find_safe_upgrade_target", resource: "https://upgradelens.mattpicone.workers.dev/mcp#find_safe_upgrade_target", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+      { tool: "plan_dependency_upgrade", resource: "https://upgradelens.mattpicone.workers.dev/mcp#plan_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
     ],
     unsuitable_task_rejected: true,
     bazaar_mcp: { ok: true, matched_tools: ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"] },

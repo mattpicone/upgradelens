@@ -388,6 +388,13 @@ export function pricingDocument(env: Env) {
   };
 }
 
+export function mcpToolResourceUrl(baseUrl: string, toolName: string): string {
+  // CDP Bazaar catalogs MCP resources as HTTPS origin + /mcp + #toolName.
+  // mcp:// URLs are valid x402 ResourceInfo values but produce a null origin
+  // and are dropped by the facilitator indexer.
+  return `${new URL(baseUrl).origin}/mcp#${toolName}`;
+}
+
 export function registryMetadata(env: Env) {
   return {
     $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",

@@ -17,7 +17,7 @@ import type { AppVariables } from "../context";
 import { readJsonBody } from "../http/body";
 import { executeAnalysis } from "../payment";
 import { MachineError, machineError } from "../errors";
-import { CONTRACT_VERSION, MCP_BUSINESS_TOOL_NAMES, MCP_TOOLS } from "../contract";
+import { CONTRACT_VERSION, MCP_BUSINESS_TOOL_NAMES, MCP_TOOLS, mcpToolResourceUrl } from "../contract";
 import { checkRateLimit, classifyMcpSource } from "../telemetry";
 
 export { MCP_BUSINESS_TOOL_NAMES, MCP_TOOLS } from "../contract";
@@ -324,7 +324,7 @@ async function handleMessage(
           operation: name as "check_dependency_upgrade" | "find_safe_upgrade_target" | "plan_dependency_upgrade",
           args: normalizedArgs,
           units: 1,
-          resource: `mcp://tool/${name}`,
+          resource: mcpToolResourceUrl(env.PUBLIC_BASE_URL, name),
           paymentPayload:
             (msg.params?._meta as Record<string, unknown> | undefined)?.["x402/payment"] as never ?? null,
           businessEligible,

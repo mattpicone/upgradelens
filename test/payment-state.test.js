@@ -390,9 +390,9 @@ describe("paid authorization validation", () => {
       idempotent_retry: true,
       replay_rejected: true,
       payment_challenges: [
-        { tool: "check_dependency_upgrade", resource: "mcp://tool/check_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
-        { tool: "find_safe_upgrade_target", resource: "mcp://tool/find_safe_upgrade_target", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
-        { tool: "plan_dependency_upgrade", resource: "mcp://tool/plan_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+        { tool: "check_dependency_upgrade", resource: "https://upgradelens.test/mcp#check_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+        { tool: "find_safe_upgrade_target", resource: "https://upgradelens.test/mcp#find_safe_upgrade_target", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+        { tool: "plan_dependency_upgrade", resource: "https://upgradelens.test/mcp#plan_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
       ],
       unsuitable_task_rejected: true,
       bazaar_mcp_discovered: true,

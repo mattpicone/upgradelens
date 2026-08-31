@@ -40,11 +40,17 @@ function normalizedEndpoint(value) {
   return `${url.origin}${url.pathname.replace(/\/+$/, "") || "/"}`;
 }
 
+function advertisedMcpResourceUrl(toolName) {
+  if (!acceptanceServiceUrl) return `mcp://tool/${toolName}`;
+  const trusted = new URL(acceptanceServiceUrl);
+  return `${trusted.origin}${trusted.pathname.replace(/\/+$/, "")}#${toolName}`;
+}
+
 function acceptancePaymentMatches({ toolName, paymentRequired }) {
   const accepts = Array.isArray(paymentRequired?.accepts) ? paymentRequired.accepts : [];
   const requirement = accepts[0];
   return paymentRequired?.x402Version === 2 &&
-    paymentRequired?.resource?.url === `mcp://tool/${toolName}` &&
+    paymentRequired?.resource?.url === advertisedMcpResourceUrl(toolName) &&
     paymentRequired?.extensions?.["payment-identifier"]?.info?.required === true &&
     accepts.length === 1 &&
     requirement?.scheme === "exact" &&
@@ -77,7 +83,7 @@ function matchingBazaarEntry(entry) {
   if (
     acceptanceToolNames.includes(toolName) &&
     serviceName === "UpgradeLens" &&
-    resourceUrl === `mcp://tool/${toolName}` &&
+    resourceUrl === advertisedMcpResourceUrl(toolName) &&
     required?.x402Version === 2 &&
     accepts.length === 1 &&
     requirement?.scheme === "exact" &&

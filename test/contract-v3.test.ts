@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { CONTRACT_VERSION, MCP_TOOLS, OPERATION_CATALOG, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
+import { CONTRACT_VERSION, MCP_TOOLS, OPERATION_CATALOG, mcpToolResourceUrl, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
 import { fakeEnv } from "./helpers";
 import { deriveTrialSubject } from "../src/telemetry";
 import { paymentActivation } from "../src/payment";
@@ -14,6 +14,9 @@ describe("v0.3 machine contract", () => {
       "find_safe_upgrade_target",
       "plan_dependency_upgrade",
     ]);
+    expect(mcpToolResourceUrl("https://upgradelens.test/", "check_dependency_upgrade")).toBe(
+      "https://upgradelens.test/mcp#check_dependency_upgrade",
+    );
     const openapi = openApiDocument(fakeEnv());
     expect(openapi.info.version).toBe(CONTRACT_VERSION);
     expect(Object.keys(openapi.paths)).toEqual(expect.arrayContaining([
@@ -54,7 +57,7 @@ describe("v0.3 machine contract", () => {
     expect(validate({
       x402Version: 2,
       error: "Payment required",
-      resource: { url: "mcp://tool/check_dependency_upgrade" },
+      resource: { url: "https://upgradelens.test/mcp#check_dependency_upgrade" },
       accepts: [{ scheme: "exact", network: "eip155:84532", amount: "10000" }],
       extensions: { "payment-identifier": { info: { required: true } } },
     }).valid).toBe(true);

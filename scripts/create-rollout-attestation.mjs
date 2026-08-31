@@ -39,9 +39,11 @@ if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
   process.exit(2);
 }
 let expectedAcceptanceEndpoint;
+let advertisedMcpResource;
 try {
   const parsed = new URL(acceptanceServiceUrl);
   if (parsed.protocol !== "https:") throw new Error("acceptance URL must use HTTPS");
+  advertisedMcpResource = `${parsed.origin}${parsed.pathname.replace(/\/+$/, "") || "/"}`;
   parsed.pathname = "/mcp-testnet";
   parsed.search = "";
   parsed.hash = "";
@@ -70,7 +72,7 @@ const challengesValid = paymentChallenges.length === expectedTools.length &&
   new Set(challengeTools).size === expectedTools.length &&
   JSON.stringify(challengeTools) === JSON.stringify(expectedTools) &&
   paymentChallenges.every((entry) =>
-    entry?.resource === `mcp://tool/${entry.tool}` &&
+    entry?.resource === `${advertisedMcpResource}#${entry.tool}` &&
     entry?.network === expectedNetwork &&
     entry?.amount === expectedAmount &&
     String(entry?.asset || "").toLowerCase() === expectedAsset &&

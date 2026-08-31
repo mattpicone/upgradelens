@@ -22,6 +22,7 @@ import {
   OPERATION_CATALOG,
   networkForMode,
   knownUnitCostMicros,
+  mcpToolResourceUrl,
   operationByName,
   paymentMode,
   type OperationName,
@@ -583,7 +584,7 @@ async function assertMainnetAttested(env: Env): Promise<void> {
     JSON.stringify(challengeTools) === JSON.stringify(expectedTools) &&
     acceptanceChallenges.every((entry) =>
       entry.tool &&
-      entry.resource === `mcp://tool/${entry.tool}` &&
+      entry.resource === mcpToolResourceUrl(env.PUBLIC_BASE_URL, entry.tool) &&
       entry.network === expectedNetwork &&
       entry.amount === expectedAmount &&
       entry.asset?.toLowerCase() === expectedAsset &&
