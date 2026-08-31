@@ -7,9 +7,10 @@
   compatibility, and migration tasks without exceeding the Registry's
   100-character description limit.
 - Hardened the paid-mode Worker path with a Worker-native CDP facilitator JWT
-  client and removed the unused Node-oriented CDP SDK dependency; the machine
-  contract and pricing remain unchanged.
-- No API, pricing, payment, or analysis behavior changed from 0.3.0.
+  client and removed the unused Node-oriented CDP SDK dependency.
+- Added isolated controlled-testnet run identities, exact receipt/amount
+  validation, replay evidence, strict Bazaar REST/MCP acceptance checks, and
+  self-validating output examples; mainnet remains disabled by default.
 
 ## 0.3.0 — 2026-08-30
 

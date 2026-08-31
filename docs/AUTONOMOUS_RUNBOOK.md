@@ -28,11 +28,11 @@ The controlled release proof is generated without mainnet activity:
 MCP_PATH=/mcp-testnet \
 ACCEPTANCE_SERVICE_URL=https://upgradelens.mattpicone.workers.dev/mcp \
 BAZAAR_REST_URL=https://api.cdp.coinbase.com/platform/v2/x402/discovery/search \
-X402_PAY_TO=<configured-recipient> \
+X402_PAY_TO=0xAd7bD10e645EDaE5813fB5e177ad3dB806843C57 \
 npm run --silent buyer:harness -- --acceptance > /tmp/upgradelens-testnet-acceptance.json
 TESTNET_ACCEPTANCE_FILE=/tmp/upgradelens-testnet-acceptance.json \
 ACCEPTANCE_SERVICE_URL=https://upgradelens.mattpicone.workers.dev/mcp \
-X402_PAY_TO=<configured-recipient> \
+X402_PAY_TO=0xAd7bD10e645EDaE5813fB5e177ad3dB806843C57 \
 npm run rollout:attest -- --sql
 ```
 
