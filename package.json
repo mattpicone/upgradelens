@@ -35,7 +35,6 @@
     "db:payments:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0006_machine_payments.sql"
   },
   "dependencies": {
-    "@coinbase/cdp-sdk": "1.55.0",
     "@x402/core": "2.24.0",
     "@x402/evm": "2.24.0",
     "@x402/extensions": "2.24.0",
