@@ -54,29 +54,6 @@ function acceptancePaymentMatches({ toolName, paymentRequired }) {
     String(requirement?.payTo || "").toLowerCase() === expectedPayTo;
 }
 
-function matchingBazaarTools(structured) {
-  if (!expectedPayTo || !Array.isArray(structured?.tools)) return [];
-  const matched = new Set();
-  for (const tool of structured.tools) {
-    const required = tool?._meta?.["x402/payment-required"];
-    const toolName = required?.extensions?.bazaar?.info?.input?.toolName;
-    const requirement = Array.isArray(required?.accepts) ? required.accepts[0] : null;
-    if (
-      acceptanceToolNames.includes(toolName) &&
-      required?.resource?.serviceName === "UpgradeLens" &&
-      required?.resource?.url === `mcp://tool/${toolName}` &&
-      Array.isArray(required.accepts) && required.accepts.length === 1 &&
-      requirement?.scheme === "exact" &&
-      requirement?.network === acceptanceNetwork &&
-      requirement?.amount === acceptanceAmount &&
-      String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
-      String(requirement?.payTo || "").toLowerCase() === expectedPayTo &&
-      capabilityScore(required, buyerTask) > 0
-    ) matched.add(toolName);
-  }
-  return [...matched].sort();
-}
-
 function bazaarResources(value) {
   if (Array.isArray(value)) return value;
   if (Array.isArray(value?.resources)) return value.resources;
@@ -84,31 +61,48 @@ function bazaarResources(value) {
   return [];
 }
 
+function matchingBazaarEntry(entry) {
+  const required = entry?._meta?.["x402/payment-required"] || entry;
+  const info = required?.extensions?.bazaar?.info?.input || entry?.extensions?.bazaar?.info?.input;
+  const toolName = info?.toolName || entry?.toolName;
+  const resourceInfo = required?.resource || entry?.resource;
+  const resourceUrl = typeof resourceInfo === "string"
+    ? resourceInfo
+    : resourceInfo?.url || required?.url || entry?.url;
+  const serviceName = typeof resourceInfo === "object"
+    ? resourceInfo?.serviceName
+    : required?.serviceName || entry?.serviceName;
+  const accepts = Array.isArray(required?.accepts) ? required.accepts : [];
+  const requirement = accepts[0];
+  if (
+    acceptanceToolNames.includes(toolName) &&
+    serviceName === "UpgradeLens" &&
+    resourceUrl === `mcp://tool/${toolName}` &&
+    required?.x402Version === 2 &&
+    accepts.length === 1 &&
+    requirement?.scheme === "exact" &&
+    requirement?.network === acceptanceNetwork &&
+    requirement?.amount === acceptanceAmount &&
+    String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
+    String(requirement?.payTo || "").toLowerCase() === expectedPayTo &&
+    capabilityScore(entry, buyerTask) > 0
+  ) return toolName;
+  return null;
+}
+
+function matchingBazaarTools(structured) {
+  if (!expectedPayTo) return [];
+  const entries = [
+    ...(Array.isArray(structured?.tools) ? structured.tools : []),
+    ...bazaarResources(structured),
+  ];
+  const matched = new Set(entries.map(matchingBazaarEntry).filter(Boolean));
+  return [...matched].sort();
+}
+
 function matchingBazaarRestTools(value) {
   if (!expectedPayTo) return [];
-  const matched = new Set();
-  for (const resource of bazaarResources(value)) {
-    const info = resource?.extensions?.bazaar?.info?.input;
-    const toolName = info?.toolName || resource?.toolName;
-    const resourceUrl = typeof resource?.resource === "string"
-      ? resource.resource
-      : typeof resource?.url === "string" ? resource.url : resource?.resource?.url;
-    const requirement = Array.isArray(resource?.accepts) ? resource.accepts[0] : null;
-    if (
-      acceptanceToolNames.includes(toolName) &&
-      resource?.serviceName === "UpgradeLens" &&
-      resourceUrl === `mcp://tool/${toolName}` &&
-      resource?.x402Version === 2 &&
-      Array.isArray(resource.accepts) && resource.accepts.length === 1 &&
-      requirement?.scheme === "exact" &&
-      requirement?.network === acceptanceNetwork &&
-      requirement?.amount === acceptanceAmount &&
-      String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
-      String(requirement?.payTo || "").toLowerCase() === expectedPayTo &&
-      capabilityScore(resource, buyerTask) > 0
-    ) matched.add(toolName);
-  }
-  return [...matched].sort();
+  return [...new Set(bazaarResources(value).map(matchingBazaarEntry).filter(Boolean))].sort();
 }
 
 async function query(term) {
