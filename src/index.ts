@@ -61,14 +61,16 @@ app.use("*", async (c, next) => {
     "businessEligible",
     classifyMcpSource(caller.internal, caller.authState, c.req.header("user-agent")).trafficClass === "external",
   );
-  const mcpSourceFor = (requestedTool?: string) =>
-    path === "/mcp-testnet"
+  const mcpSourceFor = (requestedTool?: string) => {
+    const activeCaller = c.get("caller");
+    return path === "/mcp-testnet"
       ? {
           trafficClass: "verification" as const,
           verificationKind: "audit" as const,
           reason: "controlled_testnet_endpoint",
         }
-      : classifyMcpSource(caller.internal, caller.authState, c.req.header("user-agent"), requestedTool);
+      : classifyMcpSource(activeCaller.internal, activeCaller.authState, c.req.header("user-agent"), requestedTool);
+  };
 
   if (rateLimited && c.req.method !== "OPTIONS") {
     // request-size guard
@@ -159,6 +161,7 @@ app.use("*", async (c, next) => {
   await next();
 
   if (metered) {
+    const activeCaller = c.get("caller");
     const mcpTool = c.get("mcpTool");
     // After the funnel cutover, MCP writes only to mcp_events. Dual-writing the
     // same request into legacy usage_events creates a migration race in which a
@@ -166,8 +169,8 @@ app.use("*", async (c, next) => {
     const track = TRACKED_REST_PATHS.has(path);
     if (track) recordUsage(c.env, c.executionCtx, {
       request_id: requestId,
-      external: !caller.internal,
-      client_key: caller.clientKey,
+      external: !activeCaller.internal,
+      client_key: activeCaller.clientKey,
       surface: "rest",
       tool: path,
       ecosystem: c.get("meta")?.ecosystem,
@@ -189,12 +192,12 @@ app.use("*", async (c, next) => {
       const source = mcpSourceFor(mcpTool);
       recordMcpEvent(c.env, c.executionCtx, {
         request_id: requestId,
-        external: !caller.internal,
+        external: !activeCaller.internal,
         traffic_class: source.trafficClass,
         actor_class: classifyMcpActor(source, knownTool, toolInvoked),
         verification_kind: source.verificationKind,
         classification_reason: source.reason,
-        client_key: caller.clientKey,
+        client_key: activeCaller.clientKey,
         http_method: c.req.method,
         rpc_method: rpcMethod,
         event_kind: classifyMcpEvent(rpcMethod, c.req.method),
@@ -206,14 +209,14 @@ app.use("*", async (c, next) => {
         rpc_error_code: c.get("mcpRpcErrorCode"),
         error_kind: c.get("mcpErrorKind") ?? (status >= 500 ? "server_error" : undefined),
         protocol_version: c.get("mcpProtocolVersion"),
-        owned_test: caller.internal,
+        owned_test: activeCaller.internal,
         ecosystem: c.get("meta")?.ecosystem,
         package: c.get("meta")?.package,
         cache_hit: c.get("cacheHit") === true,
         status,
         latency_ms: Date.now() - started,
         unknown_result: c.get("unknownResult") === true,
-        auth_state: caller.authState,
+        auth_state: activeCaller.authState,
         client_name: c.get("mcpClientName"),
         client_version: c.get("mcpClientVersion"),
         user_agent: c.req.header("user-agent") ?? undefined,
