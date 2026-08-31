@@ -38,11 +38,12 @@ or failed.
 - `counts_reset_at`: `2026-08-29T19:57:23.228Z` — do not reset again
 - Owner-tagged MCP traffic is classified `internal` and does not increment
   business counters
-- Worker version 0.3.0 is deployed; the v0.3.1 metadata patch is queued. Browser/Electron Origins work, CORS
+- Worker version 0.3.1 is deployed. Browser/Electron Origins work, CORS
   preflight returns 204, legacy 2025 clients remain supported, and current
   stateless 2026-07-28 discovery/tool envelopes are implemented
-- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.3.0 is
-  published and active; the public API record and OIDC workflow were verified
+- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.3.1 is
+  published and active; the public API record, OIDC workflow, and brandless
+  task selection were verified
 - PulseMCP returns 0 servers. Glama's servers page is absent; connector listing:
   https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens. Cursor,
   Gemini gallery, Claude directory, Smithery, and general search have no live
@@ -62,7 +63,7 @@ business demand.
 ## Local engineering (cutover session)
 
 - `npm run typecheck` passed.
-- `npm test` passed (133 tests).
+- `npm test` passed (168 tests).
 - Three-pass MCP selection scorer passed: 30/30 labels and sequences per pass.
 - Production probes passed: `/healthz` version 0.2.2 with `db=ok` and
   `telemetry_schema=ok`; Cursor-origin POST 200 with CORS; OPTIONS 204; unknown

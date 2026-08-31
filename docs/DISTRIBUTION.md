@@ -16,7 +16,7 @@ and exactly what remains.
 | Surface | Status | Notes |
 |---|---|---|
 | GitHub public repo | DONE | https://github.com/mattpicone/upgradelens. Topics include `mcp`, `mcp-server`, `gemini-cli-extension`, and `agent-plugins`. The repository contract is now v0.3.1 |
-| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | v0.3.0 was published and verified on 2026-08-31; v0.3.1 is the compatibility-preserving discovery-ranking patch with the same API and pricing contract |
+| Official MCP Registry (registry.modelcontextprotocol.io) | DONE | v0.3.1 was published and verified on 2026-08-31; a brandless task search selected UpgradeLens first with all six intended capability terms |
 | Codex CLI / desktop | DONE (direct install) | Personally executed `codex mcp add upgradelens --url https://upgradelens.mattpicone.workers.dev/mcp --bearer-token-env-var OWNER_TOKEN` with Codex `0.150.0-alpha.8`. `codex mcp list` showed enabled streamable HTTP/Bearer auth; an ephemeral read-only Codex task discovered and called `check_dependency_upgrade`, receiving `review_required`, `action_allowed=false`, confidence 0.95 and four evidence records. Owner auth kept the call internal |
 | Claude Code | READY (direct install) | Current official command is `claude mcp add --transport http upgradelens https://upgradelens.mattpicone.workers.dev/mcp`. Claude CLI is not installed on this host. The Claude Connectors Directory has no UpgradeLens result; directory submission is account/review-gated at https://claude.ai/settings/plugins/submit |
 | Gemini CLI extension gallery | NOT INDEXED | Root `gemini-extension.json` and `GEMINI.md` are checked in; gallery listing remains a separate crawl and is not claimed without a live card |
@@ -45,7 +45,7 @@ and exactly what remains.
 
 ## Post-deploy checklist (automated where possible)
 
-1. ~~Publish and verify the immutable v0.3 release through the OIDC workflow~~ DONE for v0.3.0 on 2026-08-31; v0.3.1 repeats the same verified workflow for improved capability matching.
+1. ~~Publish and verify the immutable v0.3 release through the OIDC workflow~~ DONE for v0.3.1 on 2026-08-31, including a brandless selection check.
 2. ~~Prepare free discovery packages~~ DONE: Gemini extension, Agent Plugins 1.0 manifests, install docs, and immutable distribution tag.
 3. Directory submissions/checks (one each; re-verified 2026-08-30), after Worker discovery docs were live:
    - PulseMCP: **rejected / form closed**. Pause banner still up; 0 search hits. Stopped.
