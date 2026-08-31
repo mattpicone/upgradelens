@@ -291,7 +291,7 @@ export function registryMetadata(env: Env) {
     name: "io.github.mattpicone/upgradelens",
     title: "UpgradeLens",
     description:
-      "Read-only npm/PyPI dependency upgrade decisions, target ranking, and migration plans with current source citations, one free analysis, and autonomous x402 USDC payment.",
+      "Read-only npm/PyPI upgrade decisions, target ranking, and migration plans with source citations.",
     version: CONTRACT_VERSION,
     websiteUrl: env.PUBLIC_BASE_URL,
     repository: { url: "https://github.com/mattpicone/upgradelens", source: "github" },

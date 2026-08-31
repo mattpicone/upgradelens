@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.mattpicone/upgradelens",
   "title": "UpgradeLens",
-  "description": "Read-only npm/PyPI dependency upgrade decisions, target ranking, and migration plans with current source citations, one free analysis, and autonomous x402 USDC payment.",
+  "description": "Read-only npm/PyPI upgrade decisions, target ranking, and migration plans with source citations.",
   "version": "0.3.0",
   "websiteUrl": "https://upgradelens.mattpicone.workers.dev",
   "repository": {
