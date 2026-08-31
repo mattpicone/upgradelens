@@ -25,7 +25,7 @@ settles, or invokes a business handler.
 The controlled release proof is generated without mainnet activity:
 
 ```sh
-MCP_PATH=/mcp-testnet npm run buyer:harness -- --acceptance > /tmp/upgradelens-testnet-acceptance.json
+MCP_PATH=/mcp-testnet npm run --silent buyer:harness -- --acceptance > /tmp/upgradelens-testnet-acceptance.json
 TESTNET_ACCEPTANCE_FILE=/tmp/upgradelens-testnet-acceptance.json npm run rollout:attest -- --sql
 ```
 
