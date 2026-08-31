@@ -50,7 +50,7 @@ async function queryBazaarMcp() {
     }
     const result = await client.callTool({
       name: "search_resources",
-      arguments: { query: buyerTask },
+      arguments: { query: buyerTask, curatedOnly: false },
     });
     return {
       ok: result.isError !== true,
