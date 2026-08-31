@@ -131,8 +131,10 @@ curl -X POST https://upgradelens.mattpicone.workers.dev/v1/upgrade/check \
 ```
 
 One anonymous evaluation unit is shared across MCP and REST for a rolling
-30-day network identity. Additional units use x402 v2 USDC at $0.01 per
-analysis (10,000 atomic USDC); `POST /v1/keys` is intentionally retired.
+30-day network identity. When paid mode is enabled, additional units use x402
+v2 USDC at $0.01 per analysis (10,000 atomic USDC); the public endpoint stays
+fail-closed in validation until the external testnet acceptance gate is
+recorded. `POST /v1/keys` is intentionally retired.
 
 ## MCP tools
 
