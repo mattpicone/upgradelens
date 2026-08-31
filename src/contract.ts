@@ -158,6 +158,57 @@ export const PLAN_OUTPUT_SCHEMA = {
   },
 } as const;
 
+// MCP clients validate every structuredContent value against the advertised
+// output schema, including isError results. Keep the REST/OpenAPI success
+// schemas precise while allowing the two machine-readable MCP error envelopes
+// that a business tool can legitimately return.
+const MACHINE_ERROR_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+  required: ["error"],
+  properties: {
+    error: {
+      type: "object",
+      additionalProperties: true,
+      required: ["code", "message", "retryable"],
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+        retryable: { type: "boolean" },
+        field: { type: "string" },
+        details: { type: "object" },
+      },
+    },
+  },
+} as const;
+
+const PAYMENT_REQUIRED_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+  required: ["x402Version", "resource", "accepts"],
+  properties: {
+    x402Version: { const: 2 },
+    error: { type: "string" },
+    resource: { type: "object" },
+    accepts: { type: "array", minItems: 1, items: { type: "object" } },
+    extensions: { type: "object" },
+  },
+} as const;
+
+function mcpOutputSchema(successSchema: {
+  readonly type: "object";
+  readonly additionalProperties: boolean;
+  readonly required: readonly string[];
+  readonly properties: Record<string, unknown>;
+}) {
+  return {
+    type: "object",
+    additionalProperties: true,
+    properties: successSchema.properties,
+    anyOf: [successSchema, MACHINE_ERROR_OUTPUT_SCHEMA, PAYMENT_REQUIRED_OUTPUT_SCHEMA],
+  } as const;
+}
+
 const READ_ONLY_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -212,7 +263,7 @@ export const MCP_TOOLS = OPERATION_CATALOG.map((operation) => ({
   title: operation.title,
   description: operation.description,
   inputSchema: operation.inputSchema,
-  outputSchema: operation.outputSchema,
+  outputSchema: mcpOutputSchema(operation.outputSchema),
   annotations: READ_ONLY_ANNOTATIONS,
 }));
 

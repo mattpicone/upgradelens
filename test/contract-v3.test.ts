@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { CONTRACT_VERSION, MCP_TOOLS, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
 import { fakeEnv } from "./helpers";
 import { deriveTrialSubject } from "../src/telemetry";
@@ -20,6 +21,44 @@ describe("v0.3 machine contract", () => {
       "/v1/upgrade/target",
       "/v1/upgrade/plan",
     ]));
+  });
+
+  it("advertises an MCP output schema that accepts success, machine errors, and x402 challenges", () => {
+    const validate = new AjvJsonSchemaValidator().getValidator(MCP_TOOLS[0]!.outputSchema as never);
+    expect(validate({
+      next_action: "apply_upgrade",
+      billing: {
+        mode: "validation",
+        units: 1,
+        price_usd: 0.01,
+        trial_remaining: null,
+        network: null,
+        payment_status: "validation_free",
+      },
+      decision: "proceed",
+      action_allowed: true,
+      risk_score: 0,
+      ecosystem: "npm",
+      package: "express",
+      current_version: "4.19.2",
+      target_version: "5.1.0",
+      evidence: [],
+      coverage: {},
+      confidence: 1,
+      freshness: "2026-08-31T00:00:00.000Z",
+      analysis_version: "2",
+    }).valid).toBe(true);
+    expect(validate({
+      error: { code: "payment_pending", message: "Retry with the same authorization.", retryable: true },
+    }).valid).toBe(true);
+    expect(validate({
+      x402Version: 2,
+      error: "Payment required",
+      resource: { url: "mcp://tool/check_dependency_upgrade" },
+      accepts: [{ scheme: "exact", network: "eip155:84532", amount: "10000" }],
+      extensions: { "payment-identifier": { info: { required: true } } },
+    }).valid).toBe(true);
+    expect(validate({ unrelated: true }).valid).toBe(false);
   });
 
   it("publishes exact unit pricing and capability-first registry metadata", () => {
