@@ -21,12 +21,16 @@ or failed.
 ## v0.3 release readiness (2026-08-31)
 
 - Typecheck, typed-contract drift checks, the Cloudflare dry-run bundle, the
-  three-pass selection gate, and all 168 tests pass.
+  three-pass selection gate, and all 169 tests pass (one credentialed live test
+  is intentionally skipped unless facilitator credentials are supplied).
 - The complete migration chain and idempotent v0.3 migration pass against a
   fresh SQLite database, including atomic trial delivery and stored fee data.
 - The public Worker and official Registry both passed exact v0.3 verification.
   v0.3.1 is a metadata-only patch that improves brandless capability ranking;
   the API, price, payment state machine, and revenue rules are unchanged.
+- The Worker uses a Worker-native CDP facilitator client; the live no-payment
+  probe returns the exact Base Sepolia x402 v2 challenge without executing a
+  business call or moving funds.
 - Next honest gate: run the credentialed `/mcp-testnet` acceptance and Bazaar
   proof. Mainnet remains blocked until that proof and a recoverable recipient
   are present.
@@ -63,11 +67,13 @@ business demand.
 ## Local engineering (cutover session)
 
 - `npm run typecheck` passed.
-- `npm test` passed (168 tests).
+- `npm test` passed (169 tests, one credentialed live test skipped).
 - Three-pass MCP selection scorer passed: 30/30 labels and sequences per pass.
-- Production probes passed: `/healthz` version 0.2.2 with `db=ok` and
+- Production probes passed: `/healthz` version 0.3.1 with `db=ok` and
   `telemetry_schema=ok`; Cursor-origin POST 200 with CORS; OPTIONS 204; unknown
-  protocol 400 with `-32022` and supported versions; current discovery 200.
+  protocol 400 with `-32022` and supported versions; current discovery 200; and
+  the payment challenge probe returned `payment_challenge=true` for Base
+  Sepolia without a settlement.
 - The installed Codex `0.150.0-alpha.8` client was configured using
   `codex mcp add`, showed UpgradeLens enabled, discovered its tools, and made
   one owner-tagged `check_dependency_upgrade` call. It received
