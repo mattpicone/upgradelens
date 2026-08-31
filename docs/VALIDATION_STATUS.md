@@ -2,6 +2,11 @@
 
 Updated 2026-08-30.
 
+> Historical evidence: the entries below describe the last v0.2.2 deployment.
+> The repository now contains the v0.3.0 implementation, but it is not a
+> public deployment or Registry/Bazaar proof until the release workflow and
+> operator checks confirm it.
+
 ## Current conclusion
 
 The Worker is **live**. The business experiment has **not** succeeded.
@@ -13,6 +18,19 @@ non-owned `tools/call` events for an exact UpgradeLens tool whose handler ran an
 returned semantic success count as business demand. Until those counters move — or
 the 45-day kill/pivot window ends — do not classify the experiment as successful
 or failed.
+
+## v0.3 local readiness (2026-08-31)
+
+- Typecheck, typed-contract drift checks, the Cloudflare dry-run bundle, the
+  three-pass selection gate, and all 168 tests pass.
+- The complete migration chain and idempotent v0.3 migration pass against a
+  fresh SQLite database, including atomic trial delivery and stored fee data.
+- The public Registry still reports v0.2.2. v0.3.0 is therefore implemented
+  locally but is not claimed as deployed or published.
+- Next honest gate: deploy the Worker and additive migration, verify public
+  health/OpenAPI/pricing, publish the immutable Registry record, then run the
+  credentialed `/mcp-testnet` acceptance and Bazaar proof. Mainnet remains
+  blocked.
 
 ## Live production
 
@@ -71,7 +89,10 @@ business demand.
   and Glama claim require authenticated owner/account review flows. None is
   claimed as submitted or accepted. Details and exact URLs are in
   `docs/DISTRIBUTION.md`.
-- Do not enable payments, add ecosystems, or reset the dashboard clock.
+- Do not enable **mainnet** until the v0.3 deployment, exact Registry record,
+  controlled per-tool Sepolia acceptance report, sanitized rollout proof,
+  Bazaar discovery, recipient, facilitator credentials, and margin gate all
+  pass. Do not add ecosystems or reset the dashboard clock.
 
 ## Genuine counters after verification
 

@@ -5,13 +5,14 @@
 name = "upgradelens"
 main = "src/index.ts"
 compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 [observability]
 enabled = true
 
 [triggers]
-crons = ["17 */6 * * *"] # refresh freshness/aggregate rollups every 6h
+crons = ["* * * * *"] # bounded payment reconciliation and stale-work maintenance
 
 [[d1_databases]]
 binding = "DB"
@@ -34,10 +35,20 @@ namespace_id = "11002"
 
 [vars]
 ANALYSIS_VERSION = "2"
-SERVICE_VERSION = "0.2.2"
+SERVICE_VERSION = "0.3.0"
 PAYMENTS_ENABLED = "false"
+PAYMENT_MODE = "validation"
+KNOWN_UNIT_COST_MICROS = "1000"
 PUBLIC_BASE_URL = "https://upgradelens.mattpicone.workers.dev"
 
 # Secrets (set via `wrangler secret put`):
 #   OWNER_TOKEN     — auth token for /dashboard and internal-traffic classification
 #   ADMIN_KEY       — key for privileged admin endpoints (precompute upserts from CI)
+#   TRIAL_HMAC_SECRET — secret for the rolling pseudonymous free-unit identity
+#   PAYMENT_RECOVERY_SECRET — encryption key for pending x402 reconciliation
+#   CDP_API_KEY_ID / CDP_API_KEY_SECRET — facilitator credentials (paid modes only)
+#   X402_PAY_TO — verified Base recipient address (paid modes only)
+#   RELEASE_GIT_SHA / RELEASE_LOCKFILE_HASH / RELEASE_SUITE_HASH — exact
+#     fingerprints emitted by `npm run rollout:attest`; required for mainnet
+#   MCP_TESTNET_TOKEN — optional owner-controlled token for the non-advertised
+#     same-Worker Base Sepolia acceptance endpoint `/mcp-testnet`

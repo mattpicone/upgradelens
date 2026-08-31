@@ -5,10 +5,10 @@ business without prior context.
 
 ## What this is
 
-UpgradeLens is a $0-infrastructure, agent-native microbusiness experiment:
-a read-only dependency-upgrade intelligence API + remote MCP server whose goal
-is **genuine external AI-agent usage**, measured objectively, with monetization
-prepared but inactive until demand thresholds are met.
+UpgradeLens is a machine-only, read-only dependency-upgrade intelligence API +
+remote MCP server. The v0.3 contract uses one rolling free analysis unit and
+then x402 v2 USDC; there are no subscriptions, prepaid credits, checkout
+pages, or API-key sales.
 
 ## Live production (2026-08-29)
 
@@ -35,7 +35,8 @@ prepared but inactive until demand thresholds are met.
 - **Storage:** Cloudflare D1 (SQLite), schema in `migrations/0001_init.sql`.
   KV is deliberately unused (free tier allows only 1k writes/day).
 - **MCP:** stateless streamable HTTP at `/mcp` (`src/mcp/server.ts`).
-- **Cron (Worker):** every 6h — bounded counter/telemetry cleanup + oldest-stale cache refresh.
+- **Cron (Worker):** every minute — bounded payment reconciliation, telemetry
+  cleanup, and oldest-stale cache refresh.
 - **GitHub Actions:**
   - `ci.yml` — typecheck + tests on every push; deploy on main (needs `CLOUDFLARE_API_TOKEN` secret).
     The selection corpus scorer is a required CI check. Today that secret is missing, so deploy is skipped.
@@ -62,7 +63,15 @@ Never log or commit these.
 - Minimum continuation (45 days): >=25 successful external calls AND >=3 unique external clients AND >=1 repeat client. Below that after day 45 → dashboard shows **KILL / PIVOT**.
 - Promising: >=100 successful external calls/30d, >=10 clients, >=3 clients active 3+ days.
 - Strong: >=1,000 successful calls/30d, >=20 stable keyed repeat clients, four completed weeks of positive week-over-week growth, <2% service errors, and >75% measurable gross margin. A free-only period has no measurable gross margin and cannot satisfy this gate.
-- Monetization-test trigger: >=500 successful calls/30d AND >=10 stable keyed repeat clients. This authorizes a free-to-paid experiment discussion only; payment activation remains blocked until verification, settlement, replay protection, entitlements, and explicit pilot consent exist.
+- Payment activation is a machine gate: validation is the safe default;
+  testnet/mainnet additionally require the configured facilitator, recipient,
+  recovery secret, and replay-safe durable state. Mainnet also requires the
+  release fingerprints plus a matching testnet rollout attestation. Only
+  settled eligible Base-mainnet payments count as revenue.
+- `KNOWN_UNIT_COST_MICROS` is the conservative evidenced cost per analysis
+  (default 1,000). Mainnet charging fails closed above 2,500 micros so known
+  gross margin cannot drop below 75%; the same cost is written to the durable
+  settlement ledger.
 
 ## Constraints that must not be violated
 

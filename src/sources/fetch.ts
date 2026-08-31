@@ -11,7 +11,7 @@ export interface SourceResult<T> {
   error?: string;
 }
 
-const UA = "UpgradeLens/0.2 (+https://github.com/mattpicone/upgradelens)";
+const UA = "UpgradeLens/0.3 (+https://github.com/mattpicone/upgradelens)";
 const DEFAULT_MAX_RESPONSE_BYTES = 1536 * 1024;
 
 async function readBoundedJson<T>(res: Response, maxBytes: number): Promise<T> {

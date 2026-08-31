@@ -23,6 +23,8 @@ import {
 } from "./telemetry";
 import { MCP_BUSINESS_TOOL_NAMES } from "./mcp/server";
 import { checkUpgrade } from "./service";
+import { reconcilePendingPayments } from "./payment";
+import { machineError } from "./errors";
 
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 const TRACKED_REST_PATHS = new Set([
@@ -41,26 +43,38 @@ app.use("*", async (c, next) => {
   c.header("x-request-id", requestId);
 
   const path = new URL(c.req.url).pathname;
-  const metered = path.startsWith("/v1/") || path === "/mcp";
+  const metered = path.startsWith("/v1/") || path === "/mcp" || path === "/mcp-testnet";
+  const rateLimited = !path.startsWith("/dashboard") && !path.startsWith("/admin");
   const dailyMetered = TRACKED_REST_PATHS.has(path) || path.startsWith("/v1/package/");
+  // Analysis responses can contain payment challenges or caller-specific
+  // billing state; never let an intermediary cache a metered REST result.
+  if (TRACKED_REST_PATHS.has(path)) c.header("cache-control", "no-store");
 
   // Apply CORS before rate limiting so browser clients can read 4xx responses.
   // OPTIONS is observable discovery traffic but never consumes the request fuse.
-  if (path === "/mcp") applyMcpCorsHeaders(c);
+  if (path === "/mcp" || path === "/mcp-testnet") applyMcpCorsHeaders(c);
 
   const caller = await identifyCaller(c.env, c.req.raw);
   c.set("caller", caller);
+  c.set(
+    "businessEligible",
+    classifyMcpSource(caller.internal, caller.authState, c.req.header("user-agent")).trafficClass === "external",
+  );
+  const mcpSourceFor = (requestedTool?: string) =>
+    path === "/mcp-testnet"
+      ? {
+          trafficClass: "verification" as const,
+          verificationKind: "audit" as const,
+          reason: "controlled_testnet_endpoint",
+        }
+      : classifyMcpSource(caller.internal, caller.authState, c.req.header("user-agent"), requestedTool);
 
-  if (metered && c.req.method !== "OPTIONS") {
+  if (rateLimited && c.req.method !== "OPTIONS") {
     // request-size guard
     const len = Number(c.req.header("content-length") ?? "0");
     if (len > 32 * 1024) {
-      if (path === "/mcp") {
-        const source = classifyMcpSource(
-          caller.internal,
-          caller.authState,
-          c.req.header("user-agent"),
-        );
+      if (path === "/mcp" || path === "/mcp-testnet") {
+        const source = mcpSourceFor();
         recordMcpEvent(c.env, c.executionCtx, {
           request_id: requestId,
           external: !caller.internal,
@@ -84,22 +98,17 @@ app.use("*", async (c, next) => {
           referrer: c.req.header("referer") ?? undefined,
         });
       }
-      return c.json({ error: { code: "payload_too_large", message: "Body exceeds 32KB." } }, 413);
+      return c.json(machineError("invalid_input", "Body exceeds 32KB.", false, { reason: "payload_too_large" }), 413);
     }
-    // Protocol, key issuance and evidence lookup get burst protection without
+    // Protocol, retired-key compatibility and evidence lookup get burst protection without
     // consuming the global analysis fuse. Actual upstream work is daily-metered.
     const rate = await checkRateLimit(c.env, caller, { daily: dailyMetered });
     c.header("x-ratelimit-remaining-day", String(rate.remaining_day));
     if (!rate.allowed) {
       const res = c.json(
-        {
-          error: {
-            code: "rate_limited",
-            message:
-              "Free quota exceeded. Create a free API key via POST /v1/keys for higher limits, or retry later.",
-            retry_after_s: rate.retry_after_s,
-          },
-        },
+        machineError("rate_limited", "The request rate is temporarily limited. Retry after the indicated delay.", true, {
+          retry_after_s: rate.retry_after_s,
+        }),
         429,
       );
       if (TRACKED_REST_PATHS.has(path)) recordUsage(c.env, c.executionCtx, {
@@ -117,12 +126,8 @@ app.use("*", async (c, next) => {
         user_agent: c.req.header("user-agent") ?? undefined,
         referrer: c.req.header("referer") ?? undefined,
       });
-      if (path === "/mcp") {
-        const source = classifyMcpSource(
-          caller.internal,
-          caller.authState,
-          c.req.header("user-agent"),
-        );
+      if (path === "/mcp" || path === "/mcp-testnet") {
+        const source = mcpSourceFor();
         recordMcpEvent(c.env, c.executionCtx, {
           request_id: requestId,
           external: !caller.internal,
@@ -175,17 +180,12 @@ app.use("*", async (c, next) => {
       user_agent: c.req.header("user-agent") ?? undefined,
       referrer: c.req.header("referer") ?? undefined,
     });
-    if (path === "/mcp") {
+    if (path === "/mcp" || path === "/mcp-testnet") {
       const rpcMethod = c.get("mcpMethod");
       const knownTool = Boolean(mcpTool && MCP_BUSINESS_TOOL_NAMES.has(mcpTool));
       const toolInvoked = c.get("mcpToolInvoked") === true;
       const status = c.get("mcpIsError") ? 422 : c.res.status;
-      const source = classifyMcpSource(
-        caller.internal,
-        caller.authState,
-        c.req.header("user-agent"),
-        mcpTool,
-      );
+      const source = mcpSourceFor(mcpTool);
       recordMcpEvent(c.env, c.executionCtx, {
         request_id: requestId,
         external: !caller.internal,
@@ -227,37 +227,48 @@ app.route("/v1", api);
 app.route("/", meta);
 app.route("/dashboard", dashboard);
 app.route("/admin", admin);
+app.all("/mcp-testnet", async (c) => {
+  const token = c.req.header("authorization")?.replace(/^Bearer\s+/i, "").trim();
+  if (!c.env.MCP_TESTNET_TOKEN || token !== c.env.MCP_TESTNET_TOKEN) {
+    return c.json(machineError("not_found", "The controlled testnet endpoint is not enabled.", false), 404);
+  }
+  return handleMcp(c, { PAYMENT_MODE: "testnet" });
+});
 app.all("/mcp", (c) => handleMcp(c));
 
 app.notFound((c) =>
-  c.json(
-    {
-      error: {
-        code: "not_found",
-        message: "Unknown endpoint. See /openapi.json and /llms.txt.",
-      },
-    },
-    404,
-  ),
+  c.json(machineError("not_found", "Unknown endpoint. See /openapi.json and /llms.txt."), 404),
 );
 
 app.onError((err, c) => {
   console.error("unhandled_error", { message: err.message, path: c.req.path });
-  return c.json(
-    { error: { code: "internal_error", message: "Internal error. No fabricated data returned." } },
-    500,
-  );
+  return c.json(machineError("internal_error", "Internal error. No fabricated data returned.", true), 500);
 });
 
 // ---- scheduled maintenance ---------------------------------------------------
 async function scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
   ctx.waitUntil(
     (async () => {
-      await cleanupRateCounters(env);
-      await cleanupUsageEvents(env);
-      // Refresh the oldest stale pairs. Runtime context is reconstructed so a
-      // runtime-specific cache entry is refreshed under the same cache key.
       try {
+        await reconcilePendingPayments(env);
+      } catch {
+        // A facilitator outage must not stop bounded cleanup or freshness work.
+      }
+      try {
+        await cleanupRateCounters(env);
+      } catch {
+        // Telemetry maintenance is independent of settlement authority.
+      }
+      try {
+        await cleanupUsageEvents(env);
+      } catch {
+        // Telemetry maintenance is independent of settlement authority.
+      }
+      // Refresh the oldest stale pairs once per hour. Runtime context is
+      // reconstructed so a runtime-specific cache entry is refreshed under
+      // the same cache key; the every-minute cron is reserved for bounded
+      // payment reconciliation and cleanup.
+      if (new Date().getUTCMinutes() === 17) try {
         const rows = await env.DB.prepare(
           `SELECT ecosystem, package, from_version, to_version, runtime_key
            FROM upgrade_pairs

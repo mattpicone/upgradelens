@@ -4,13 +4,14 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
 import type { AppVariables } from "../context";
+import { machineError } from "../errors";
 
 export const admin = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 admin.use("*", async (c, next) => {
   const key = c.req.header("x-admin-key") ?? "";
   if (!c.env.ADMIN_KEY || key !== c.env.ADMIN_KEY) {
-    return c.json({ error: { code: "unauthorized", message: "Admin key required." } }, 401);
+    return c.json(machineError("unauthorized", "Admin key required.", false), 401);
   }
   await next();
 });
@@ -35,17 +36,17 @@ admin.post("/breaking-changes", async (c) => {
   try {
     const parsed: unknown = await c.req.json();
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return c.json({ error: { code: "invalid_request", message: "Body must be a JSON object." } }, 400);
+      return c.json(machineError("invalid_input", "Body must be a JSON object.", false), 400);
     }
     body = parsed as typeof body;
   } catch {
-    return c.json({ error: { code: "invalid_json", message: "Body must be JSON." } }, 400);
+    return c.json(machineError("invalid_json", "Body must be JSON.", false), 400);
   }
   if (!Array.isArray(body.rows)) {
-    return c.json({ error: { code: "invalid_request", message: "rows must be an array." } }, 400);
+    return c.json(machineError("invalid_input", "rows must be an array.", false), 400);
   }
   if (body.rows.length > 500) {
-    return c.json({ error: { code: "too_many_rows", message: "At most 500 rows may be ingested at once." } }, 400);
+    return c.json(machineError("invalid_input", "At most 500 rows may be ingested at once.", false), 400);
   }
   const rows = body.rows;
   const now = new Date().toISOString();
@@ -77,12 +78,11 @@ admin.post("/breaking-changes", async (c) => {
     );
     if (!targetValid || accepted.length !== rows.length || !allRowsMatch) {
       return c.json(
-        {
-          error: {
-            code: "invalid_replace",
-            message: "A replacement requires a valid ecosystem/package and only valid rows for that exact package.",
-          },
-        },
+        machineError(
+          "invalid_input",
+          "A replacement requires a valid ecosystem/package and only valid rows for that exact package.",
+          false,
+        ),
         400,
       );
     }
@@ -125,7 +125,7 @@ admin.post("/breaking-changes", async (c) => {
 admin.post("/refresh-source-snapshot", async (c) => {
   const { source } = (await c.req.json().catch(() => ({}))) as { source?: string };
   if (!source || !/^[a-z_]{1,30}$/.test(source)) {
-    return c.json({ error: { code: "invalid_request", message: "source required" } }, 400);
+    return c.json(machineError("invalid_input", "source required", false), 400);
   }
   await c.env.DB.prepare(
     `INSERT INTO source_snapshots (source, last_success_at) VALUES (?, ?)

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { app } from "../src/index.ts";
 import { MCP_TOOLS } from "../src/mcp/server.ts";
+import { registryMetadata } from "../src/contract.ts";
 import { fakeEnv, fakeCtx } from "./helpers.ts";
 
 const readJson = (name) => JSON.parse(readFileSync(new URL(`../${name}`, import.meta.url), "utf8"));
@@ -13,8 +14,14 @@ const EXPECTED_TOOLS = [
 ];
 
 describe("free discovery manifests", () => {
+  it("keeps the publishable Registry file identical to typed Registry metadata", () => {
+    const env = fakeEnv({ PUBLIC_BASE_URL: "https://upgradelens.mattpicone.workers.dev" });
+    expect(readJson("server.json")).toEqual(registryMetadata(env));
+  });
+
   it("declares a Gemini CLI remote extension without credentials", () => {
     const manifest = readJson("gemini-extension.json");
+    expect(manifest.version).toBe("0.3.0");
     expect(manifest.name).toBe("upgradelens");
     expect(manifest.mcpServers.upgradelens.httpUrl).toBe(PRODUCTION_MCP);
     expect(manifest.mcpServers.upgradelens.timeout).toBe(30000);
@@ -25,6 +32,7 @@ describe("free discovery manifests", () => {
     const plugin = readJson("plugin.json");
     const mcp = readJson("mcp.json");
     expect(plugin.$schema).toBe("https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
+    expect(plugin.version).toBe("0.3.0");
     expect(plugin.name).toBe("upgradelens");
     expect(plugin.keywords).toEqual(expect.arrayContaining(["dependency-upgrades", "mcp"]));
     expect(mcp.$schema).toBe("https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
@@ -66,6 +74,7 @@ describe("free discovery manifests", () => {
     expect(serverRes.status).toBe(200);
     expect(serverRes.headers.get("cache-control")).toMatch(/max-age=3600/);
     const server = await serverRes.json();
+    expect(server.version).toBe("0.3.0");
     expect(server.remotes).toEqual([{ type: "streamable-http", url: liveMcp }]);
     expect(server.websiteUrl).toBe(base);
 

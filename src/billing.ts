@@ -1,43 +1,43 @@
-// Monetization scaffolding. Payments remain deliberately unavailable until a
-// verifier/settler, destination, replay protection, and entitlement lifecycle
-// are implemented and tested. A config flag alone can never activate charging.
+// Billing compatibility surface. The active v0.3 rail lives in payment.ts;
+// these exports preserve the legacy accounting helpers for existing operators
+// while ensuring a config flag alone can never activate charging.
 
 import type { Env } from "./types";
 import { hashApiKey } from "./telemetry";
+import { paymentActivation as machinePaymentActivation } from "./payment";
 
 export const PRICING = {
   currency: "USD",
   free_tier: {
-    anonymous_daily_calls: 100,
-    keyed_daily_calls: 500,
-    note: "Free validation stage. Generous limits so agents can evaluate the service.",
+    units_per_network_identity: 1,
+    rolling_days: 30,
+    note: "One free business unit per pseudonymous network identity; shared by MCP and REST.",
   },
   paid: {
-    enriched_check_per_call: 0.02,
-    starter_monthly: { price: 19, enriched_calls: 2000 },
-    builder_monthly: { price: 49, enriched_calls: 10000 },
-    status: "blocked_pending_payment_implementation",
-    rails_planned: ["x402", "prepaid_credits"],
+    unit_price_usd: 0.01,
+    unit_price_atomic_usdc: "10000",
+    rail: "x402-v2",
+    status: "machine_only",
   },
 } as const;
 
 export function paymentsEnabled(env: Env): boolean {
-  return paymentActivation(env).ready;
+  const activation = machinePaymentActivation(env);
+  return activation.ready && (activation.mode === "testnet" || activation.mode === "mainnet");
 }
 
 export function paymentActivation(env: Env): {
   requested: boolean;
-  ready: false;
+  ready: boolean;
   blockers: string[];
+  mode: string;
 } {
+  const activation = machinePaymentActivation(env);
   return {
-    requested: env.PAYMENTS_ENABLED === "true",
-    ready: false,
-    blockers: [
-      ...(env.X402_PAY_TO ? [] : ["X402_PAY_TO is not configured"]),
-      "x402 v2 payment verification and settlement are not implemented",
-      "replay protection and paid entitlement lifecycle are not implemented",
-    ],
+    requested: activation.mode !== "validation",
+    ready: activation.ready,
+    blockers: activation.blockers,
+    mode: activation.mode,
   };
 }
 

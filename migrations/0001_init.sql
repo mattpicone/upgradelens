@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS billing_ledger (
   request_id TEXT,
   entry_type TEXT NOT NULL,       -- debit | credit | fee
   amount_usd REAL NOT NULL,
-  rail TEXT,                      -- x402 | credits | subscription
+  rail TEXT,                      -- legacy telemetry only; v0.3 uses x402-v2
   settlement_id TEXT,
   note TEXT
 );

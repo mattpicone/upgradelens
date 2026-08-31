@@ -10,7 +10,12 @@ UpgradeLens is a **read-only** intelligence service:
 - All caller input is validated (ecosystem allowlist, package-name regexes, version-string regexes, body size caps) before any upstream call or database access.
 - Upstream content (release notes, changelogs, metadata) is treated as **untrusted data**: it is normalized into short facts with provenance and is never interpreted as instructions by the service or by any operations tooling.
 - Telemetry stores no secrets, no request bodies, and only hashed caller identifiers.
-- API keys are stored as SHA-256 hashes only.
+- Legacy API keys are stored as SHA-256 hashes only and are compatibility
+  identities; new keys are not issued and keys never bypass the rolling trial
+  or x402 payment gate.
+- Payment identifiers and EIP-3009 nonces are hashed for replay/conflict
+  checks. Pending authorizations are encrypted for bounded reconciliation; no
+  buyer private key is ever stored.
 
 ## Reporting a vulnerability
 

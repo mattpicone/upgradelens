@@ -7,7 +7,8 @@ import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import type { AppVariables } from "../context";
-import { paymentActivation } from "../billing";
+import { paymentActivation } from "../payment";
+import { paymentMode, networkForMode } from "../contract";
 
 // Browser sign-in support: the owner pastes the token once and a scoped,
 // HttpOnly cookie keeps that device signed in. The token never appears in a
@@ -156,6 +157,7 @@ export interface Stats {
   fees: number;
   grossProfit: number;
   grossMargin: number | null;
+  businessCallsAvailable?: boolean;
 }
 
 // This is the only population allowed to influence business state. Protocol
@@ -197,10 +199,23 @@ export async function collectStats(env: Env): Promise<Stats> {
   }
   const dashboardSince = countsResetAt ?? "0000-01-01T00:00:00.000Z";
 
-  const overviewCalls = await one<{ total_calls: number }>(
+  const legacyOverviewCalls = await one<{ total_calls: number }>(
     `SELECT COUNT(*) total_calls FROM mcp_events WHERE ts >= ?`,
     dashboardSince,
   );
+  let businessCallsAvailable = false;
+  let businessOverview: { total_calls: number; good_calls: number } | null = null;
+  try {
+    businessOverview = await one<{ total_calls: number; good_calls: number }>(
+      `SELECT COALESCE(SUM(units),0) total_calls,
+         COALESCE(SUM(CASE WHEN delivery_state='delivered' THEN units ELSE 0 END),0) good_calls
+       FROM business_calls WHERE business_eligible=1 AND created_at >= ?`,
+      dashboardSince,
+    );
+    businessCallsAvailable = businessOverview !== null;
+  } catch {
+    // Older deployments are read using the legacy MCP funnel until migration 0006 lands.
+  }
 
   const todayRow = await one<{
     attempts: number;
@@ -477,20 +492,42 @@ export async function collectStats(env: Env): Promise<Stats> {
   lat.sort((a, b) => a.latency_ms - b.latency_ms);
   const pct = (p: number) =>
     lat.length === 0 ? 0 : (lat[Math.min(lat.length - 1, Math.floor((p / 100) * lat.length))]?.latency_ms ?? 0);
-  const ledger = await one<{ revenue: number; fees: number }>(
-    `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue,
-       COALESCE(SUM(CASE WHEN entry_type='fee' THEN amount_usd ELSE 0 END),0) fees
-     FROM billing_ledger WHERE ts >= ? AND ts >= ?`,
-    d30,
-    dashboardSince,
-  );
-  const revenue = ledger?.revenue ?? 0;
-  const fees = ledger?.fees ?? 0;
-  const lifetimeLedger = await one<{ revenue: number }>(
-    `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue
-     FROM billing_ledger WHERE ts >= ?`,
-    dashboardSince,
-  );
+  let revenue = 0;
+  let fees = 0;
+  let lifetimeRevenue = 0;
+  try {
+    const ledgerV3 = await one<{ revenue: number; fees: number }>(
+      `SELECT COALESCE(SUM(CASE WHEN eligible_mainnet=1 THEN (amount_micros-refunded_micros) ELSE 0 END),0)/1000000 revenue,
+         COALESCE(SUM(CASE WHEN eligible_mainnet=1 THEN fee_micros ELSE 0 END),0)/1000000 fees
+       FROM billing_ledger_v3 WHERE created_at >= ? AND created_at >= ?`,
+      d30,
+      dashboardSince,
+    );
+    const lifetimeV3 = await one<{ revenue: number }>(
+      `SELECT COALESCE(SUM(CASE WHEN eligible_mainnet=1 THEN (amount_micros-refunded_micros) ELSE 0 END),0)/1000000 revenue
+       FROM billing_ledger_v3 WHERE created_at >= ?`,
+      dashboardSince,
+    );
+    revenue = ledgerV3?.revenue ?? 0;
+    fees = ledgerV3?.fees ?? 0;
+    lifetimeRevenue = lifetimeV3?.revenue ?? 0;
+  } catch {
+    const ledger = await one<{ revenue: number; fees: number }>(
+      `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue,
+         COALESCE(SUM(CASE WHEN entry_type='fee' THEN amount_usd ELSE 0 END),0) fees
+       FROM billing_ledger WHERE ts >= ? AND ts >= ?`,
+      d30,
+      dashboardSince,
+    );
+    revenue = ledger?.revenue ?? 0;
+    fees = ledger?.fees ?? 0;
+    const lifetimeLedger = await one<{ revenue: number }>(
+      `SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount_usd ELSE 0 END),0) revenue
+       FROM billing_ledger WHERE ts >= ?`,
+      dashboardSince,
+    );
+    lifetimeRevenue = lifetimeLedger?.revenue ?? 0;
+  }
   const experiment = await one<{ started_at: string }>(
     `SELECT started_at FROM experiments
      WHERE name='organic_mcp_validation' AND ended_at IS NULL
@@ -499,8 +536,8 @@ export async function collectStats(env: Env): Promise<Stats> {
 
   return {
     overview: {
-      totalCalls: overviewCalls?.total_calls ?? 0,
-      revenue: lifetimeLedger?.revenue ?? 0,
+      totalCalls: businessOverview?.total_calls ?? legacyOverviewCalls?.total_calls ?? 0,
+      revenue: lifetimeRevenue,
     },
     today: {
       attempts: todayRow?.attempts ?? 0,
@@ -513,7 +550,7 @@ export async function collectStats(env: Env): Promise<Stats> {
     },
     total: {
       attempts: totalRow?.attempts ?? 0,
-      success: totalRow?.success ?? 0,
+      success: businessOverview?.good_calls ?? totalRow?.success ?? 0,
       unique: totalRow?.unique_c ?? 0,
       repeat: repeatTotal?.n ?? 0,
       firstTs: totalRow?.first_ts ?? null,
@@ -578,6 +615,7 @@ export async function collectStats(env: Env): Promise<Stats> {
     // zero margin here would falsely satisfy a paid-economics gate.
     grossMargin: revenue > 0 ? (revenue - fees) / revenue : null,
     countsResetAt,
+    businessCallsAvailable,
   };
 }
 
@@ -596,7 +634,7 @@ export function businessState(s: Stats): { state: string; why: string } {
   ) {
     return {
       state: "STRONG SIGNAL",
-      why: `${s.d30.success} successful external calls in 30d, ${s.d30.keyed_repeat} repeat stable keyed clients, four consecutive positive-growth weeks, ${(errRate * 100).toFixed(1)}% service error rate, and ${(s.grossMargin * 100).toFixed(1)}% gross margin.`,
+      why: `${s.d30.success} successful external calls in 30d, ${s.d30.keyed_repeat} stable client identities, four consecutive positive-growth weeks, ${(errRate * 100).toFixed(1)}% service error rate, and ${(s.grossMargin * 100).toFixed(1)}% gross margin.`,
     };
   }
   if (
@@ -605,7 +643,7 @@ export function businessState(s: Stats): { state: string; why: string } {
   ) {
     return {
       state: "MONETIZATION TEST ELIGIBLE",
-      why: `${s.d30.success} successful external calls in 30d and ${s.d30.keyed_repeat} repeat stable keyed clients meet the free-to-paid experiment trigger (≥500 calls and ≥10 repeat clients). Payment activation remains blocked pending the payment implementation and explicit pilot consent.`,
+      why: `${s.d30.success} successful external calls in 30d and ${s.d30.keyed_repeat} stable client identities meet the usage trigger. The x402 payment gate is governed by its configured mode and fail-closed activation checks.`,
     };
   }
   if (
@@ -615,7 +653,7 @@ export function businessState(s: Stats): { state: string; why: string } {
   ) {
     return {
       state: "PROMISING",
-      why: `${s.d30.success} successful external calls in 30d from ${s.d30.keyed_unique} stable keyed clients; ${s.d30.keyed_active3days} keyed clients active on 3+ days.`,
+      why: `${s.d30.success} successful external calls in 30d from ${s.d30.keyed_unique} stable client identities; ${s.d30.keyed_active3days} client identities active on 3+ days.`,
     };
   }
   if (
@@ -625,7 +663,7 @@ export function businessState(s: Stats): { state: string; why: string } {
   ) {
     return {
       state: "EARLY SIGNAL",
-      why: `${s.total.success} successful external calls include ${s.funnel.genuine_keyed_clients} stable keyed clients (${s.funnel.repeat_keyed_clients} repeat). Meets minimum continuation criteria.`,
+      why: `${s.total.success} successful external calls include ${s.funnel.genuine_keyed_clients} stable client identities (${s.funnel.repeat_keyed_clients} repeat). Meets minimum continuation criteria.`,
     };
   }
   if (s.total.success > 0 && s.total.repeat > 0) {
@@ -637,7 +675,7 @@ export function businessState(s: Stats): { state: string; why: string } {
     }
     return {
       state: "REPEAT ORGANIC TOOL USER CONFIRMED",
-      why: `${s.total.success} successful organic external business-tool calls from ${s.total.unique} privacy-preserving identities; ${s.funnel.repeat_keyed_clients} stable keyed client returned on a separate UTC day.`,
+      why: `${s.total.success} successful organic external business-tool calls from ${s.total.unique} privacy-preserving identities; a returning identity was observed on a separate UTC day.`,
     };
   }
   if (s.total.success > 0) {
@@ -649,7 +687,7 @@ export function businessState(s: Stats): { state: string; why: string } {
     }
     return {
       state: "FIRST ORGANIC CALL CONFIRMED — WAITING FOR REPEAT USER",
-      why: `${s.total.success} successful organic external business-tool calls include a stable keyed client. No keyed client has returned on a separate UTC day yet.`,
+      why: `${s.total.success} successful organic external business-tool calls include a stable client identity. No client identity has returned on a separate UTC day yet.`,
     };
   }
   if (daysLive > THRESHOLDS.minimum_days) {
@@ -710,6 +748,11 @@ dashboard.get("/", async (c) => {
   const s = await collectStats(c.env);
   const activation = paymentActivation(c.env);
   const { state, why } = businessState(s);
+  const statusLine = {
+    find: c.env.BAZAAR_STATE ?? "not_configured",
+    use: s.total.success > 0 ? "successful_result" : "awaiting_first_successful_result",
+    pay: activation.mode === "validation" ? "validation_mode" : activation.ready ? `${activation.mode}_ready` : "blocked_unconfigured",
+  };
   const errRateToday =
     s.today.attempts > 0 ? ((s.today.failed / s.today.attempts) * 100).toFixed(1) : "0.0";
   const serviceErrRateToday =
@@ -723,6 +766,7 @@ dashboard.get("/", async (c) => {
       counts_reset_at: s.countsResetAt,
       counts_reset_scope: "All dashboard aggregates below include only telemetry and ledger rows at or after counts_reset_at; prior rows are retained for audit.",
       business_state: { state, why },
+      status_line: statusLine,
       definition: {
         genuine_business_tool_call:
           "post-cutover + external + non-verification + valid/anonymous auth + not owned-test + MCP tools/call + exact UpgradeLens tool + handler invoked + semantic success",
@@ -822,9 +866,9 @@ dashboard.get("/", async (c) => {
       color: "#606C38",
     },
     "MONETIZATION TEST ELIGIBLE": {
-      title: "Ready to test revenue",
-      summary: "Usage is strong enough to consider a controlled payment test.",
-      next: "Plan a small payment pilot before enabling billing.",
+      title: "Payment gate is ready",
+      summary: "Usage is strong enough to exercise the machine payment gate.",
+      next: "Keep activation fail-closed and observe a real settled payment.",
       color: "#606C38",
     },
     "VALIDATED PAID USAGE": {
@@ -874,6 +918,7 @@ button,summary{font:inherit}button:focus-visible,summary:focus-visible{outline:3
 .verdict:after{content:"";position:absolute;width:190px;height:190px;border:34px solid ${verdict.color};border-radius:50%;right:-80px;top:-92px;opacity:.23;animation:breathe 4s ease-in-out infinite}
 .eyebrow{display:flex;align-items:center;gap:10px;color:var(--moss);font-size:.88rem;font-weight:700;margin:0 0 16px}.signal{width:12px;height:12px;border-radius:50%;background:${verdict.color};flex:0 0 auto}
 .verdict h1{position:relative;max-width:760px;font-size:clamp(2.45rem,8vw,6rem);line-height:.94;letter-spacing:-.065em;margin:0 0 24px}
+.status-line{display:flex;flex-wrap:wrap;gap:8px;margin:-30px 0 18px;color:var(--moss);font-size:.8rem}.status-line span{background:rgba(212,184,149,.56);border:1px solid var(--clay);border-radius:999px;padding:6px 10px}
 .verdict-copy{position:relative;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.75fr);gap:clamp(20px,5vw,64px);align-items:end}
 .verdict-copy p{margin:0;font-size:clamp(1rem,2.3vw,1.24rem);max-width:620px}.next{border-left:2px solid ${verdict.color};padding-left:16px;color:var(--moss);font-size:.94rem}
 .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:18px 0}
@@ -894,6 +939,7 @@ details{background:rgba(212,184,149,.34);border:1px solid var(--clay);border-rad
   <p class="brand">UpgradeLens<span>Owner dashboard</span></p>
   <p class="updated">Updated ${lastUpdated}</p>
 </header>
+<p class="status-line" aria-label="Find, use, pay status"><span>Find: ${statusLine.find}</span><span>Use: ${statusLine.use}</span><span>Pay: ${statusLine.pay}</span></p>
 
 <section class="verdict" aria-labelledby="verdict-title">
   <p class="eyebrow"><span class="signal" aria-hidden="true"></span>Day ${daysLive} of the experiment</p>
@@ -908,17 +954,17 @@ details{background:rgba(212,184,149,.34);border:1px solid var(--clay);border-rad
   <article class="metric">
     <span class="metric-label">All calls</span>
     <strong class="metric-value">${number.format(s.overview.totalCalls)}</strong>
-    <p class="metric-help">Every MCP request recorded, including checks and bots.</p>
+    <p class="metric-help">Distinct external business attempts, across MCP and REST.</p>
   </article>
   <article class="metric">
     <span class="metric-label">Good calls</span>
     <strong class="metric-value">${number.format(s.total.success)}</strong>
-    <p class="metric-help">Successful use by real users. Owner tests are excluded.</p>
+    <p class="metric-help">Distinct external results delivered successfully.</p>
   </article>
   <article class="metric">
     <span class="metric-label">Money made</span>
     <strong class="metric-value">${currency.format(s.overview.revenue)}</strong>
-    <p class="metric-help">Revenue collected since tracking started.</p>
+    <p class="metric-help">Unique eligible Base-mainnet USDC settlements, net of refunds.</p>
   </article>
 </section>
 
@@ -993,7 +1039,7 @@ details{background:rgba(212,184,149,.34);border:1px solid var(--clay);border-rad
     <h2>How the signal is calculated</h2>
     <p class="muted">The business signal counts only successful calls made by real external users after the tracking baseline. Owner tests, invalid authentication, old records, registries, crawlers, audits, scanners, research tools, health checks, setup requests, and tool-list requests are excluded. A returning user must succeed on at least two separate days.</p>
     <p class="muted">Internal status: <strong>${state}</strong>. ${why}</p>
-    <p class="muted">Tracking started ${s.countsResetAt ?? "before a recorded baseline"}. Version ${c.env.SERVICE_VERSION}; analysis ${c.env.ANALYSIS_VERSION}. Payments: ${activation.requested ? "blocked" : "off"}.</p>
+    <p class="muted">Tracking started ${s.countsResetAt ?? "before a recorded baseline"}. Version ${c.env.SERVICE_VERSION}; analysis ${c.env.ANALYSIS_VERSION}. Payment mode: ${activation.mode}; ${activation.ready ? "ready" : `blocked (${activation.blockers.join(", ")})`}.</p>
   </div>
 </details>
 

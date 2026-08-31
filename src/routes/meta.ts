@@ -3,9 +3,10 @@
 
 import { Hono } from "hono";
 import type { Env } from "../types";
-import { PRICING, paymentActivation } from "../billing";
+import { paymentActivation } from "../payment";
+import { CONTRACT_VERSION, MCP_TOOLS, openApiDocument, pricingDocument, registryMetadata } from "../contract";
 import type { AppVariables } from "../context";
-import { MCP_SUPPORTED_PROTOCOLS, MCP_TOOLS } from "../mcp/server";
+import { MCP_SUPPORTED_PROTOCOLS } from "../mcp/server";
 
 export const meta = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -48,26 +49,7 @@ function agentPluginsMcp(env: Env) {
 }
 
 function registryServerJson(env: Env) {
-  const base = env.PUBLIC_BASE_URL;
-  return {
-    $schema: MCP_SERVER_JSON_SCHEMA,
-    name: "io.github.mattpicone/upgradelens",
-    title: "UpgradeLens",
-    description:
-      "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
-    version: env.SERVICE_VERSION,
-    websiteUrl: base,
-    repository: {
-      url: "https://github.com/mattpicone/upgradelens",
-      source: "github",
-    },
-    remotes: [
-      {
-        type: "streamable-http",
-        url: mcpEndpoint(base),
-      },
-    ],
-  };
+  return { ...registryMetadata(env), $schema: MCP_SERVER_JSON_SCHEMA };
 }
 
 function experimentalServerCard(env: Env) {
@@ -75,7 +57,7 @@ function experimentalServerCard(env: Env) {
   return {
     $schema: MCP_SERVER_CARD_SCHEMA,
     name: "io.github.mattpicone/upgradelens",
-    version: env.SERVICE_VERSION,
+    version: CONTRACT_VERSION,
     title: "UpgradeLens",
     description:
       "Evidence-backed npm/PyPI upgrade risk analysis for agents: CVEs, breaking changes, EOL, compat.",
@@ -120,195 +102,10 @@ function wellKnownMcpAlias(env: Env) {
   };
 }
 
-const decisionEnum = ["proceed", "review_required", "block", "unknown"];
-
-function openapiSpec(env: Env) {
-  const base = env.PUBLIC_BASE_URL;
-  const evidence = {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      source_type: { type: "string" },
-      source_url: { type: "string" },
-      fact: { type: "string" },
-      confidence: { type: "number" },
-      fetched_at: { type: "string", format: "date-time" },
-    },
-  };
-  const checkRequest = {
-    type: "object",
-    required: ["ecosystem", "package", "current_version", "target_version"],
-    properties: {
-      ecosystem: { type: "string", enum: ["npm", "pypi"] },
-      package: { type: "string", maxLength: 214 },
-      current_version: { type: "string", maxLength: 64 },
-      target_version: { type: "string", maxLength: 64 },
-      runtime: {
-        type: "object",
-        properties: {
-          node: { type: "string", description: "Node.js version in use, e.g. 20.11.0" },
-          python: { type: "string", description: "Python version in use, e.g. 3.12" },
-        },
-      },
-    },
-  };
-  const checkResult = {
-    type: "object",
-    properties: {
-      decision: { type: "string", enum: decisionEnum },
-      action_allowed: { type: "boolean" },
-      risk_score: { type: "integer", minimum: 0, maximum: 100 },
-      ecosystem: { type: "string" },
-      package: { type: "string" },
-      current_version: { type: "string" },
-      target_version: { type: "string" },
-      latest_stable: { type: ["string", "null"] },
-      repository_url: { type: ["string", "null"] },
-      version_facts: { type: "object" },
-      security_delta: { type: "object" },
-      compatibility: { type: "object" },
-      breaking_changes: { type: "array", items: { type: "object" } },
-      reasons: { type: "array", items: { type: "string" } },
-      claim_evidence: { type: "array", items: { type: "object" } },
-      evidence: { type: "array", items: evidence },
-      coverage: { type: "object" },
-      confidence: { type: "number" },
-      freshness: { type: "string", format: "date-time" },
-      analysis_version: { type: "string" },
-      cache_hit: { type: "boolean" },
-    },
-  };
-  return {
-    openapi: "3.1.0",
-    info: {
-      title: "UpgradeLens",
-      version: env.SERVICE_VERSION,
-      description:
-        "Evidence-backed dependency upgrade intelligence for AI coding agents. One call answers: should this dependency move from version A to version B, and what must be handled? Deterministic, source-cited, no hallucinated migration facts. Free evaluation quota. Remote MCP endpoint at /mcp.",
-      contact: { url: "https://github.com/mattpicone/upgradelens" },
-    },
-    servers: [{ url: base }],
-    paths: {
-      "/v1/upgrade/check": {
-        post: {
-          operationId: "checkDependencyUpgrade",
-          summary:
-            "Decide whether a dependency can move from current_version to target_version (security, compatibility, EOL, breaking-change evidence).",
-          requestBody: {
-            required: true,
-            content: { "application/json": { schema: checkRequest } },
-          },
-          responses: {
-            "200": { description: "Upgrade decision", content: { "application/json": { schema: checkResult } } },
-            "400": { description: "Invalid request" },
-            "429": { description: "Rate limited" },
-          },
-        },
-      },
-      "/v1/upgrade/plan": {
-        post: {
-          operationId: "planDependencyUpgrade",
-          summary:
-            "Check plus ordered, source-cited migration actions and changelog URLs.",
-          requestBody: {
-            required: true,
-            content: { "application/json": { schema: checkRequest } },
-          },
-          responses: { "200": { description: "Upgrade plan with migration_actions[] and changelog_urls[]" } },
-        },
-      },
-      "/v1/upgrade/target": {
-        post: {
-          operationId: "findUpgradeCandidates",
-          summary:
-            "Rank candidate target versions when the target is not yet known; every candidate requires a full check before editing.",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["ecosystem", "package", "current_version"],
-                  properties: {
-                    ecosystem: { type: "string", enum: ["npm", "pypi"] },
-                    package: { type: "string" },
-                    current_version: { type: "string" },
-                    max_major_jump: { type: "integer", minimum: 0 },
-                    allow_prerelease: { type: "boolean" },
-                  },
-                },
-              },
-            },
-          },
-          responses: { "200": { description: "Ranked candidates with per-candidate rationale" } },
-        },
-      },
-      "/v1/upgrade/batch": {
-        post: {
-          operationId: "batchCheckUpgrades",
-          summary: "Check up to 3 version pairs in one request; each pair consumes one daily analysis unit.",
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["pairs"],
-                  properties: { pairs: { type: "array", maxItems: 3, items: checkRequest } },
-                },
-              },
-            },
-          },
-          responses: { "200": { description: "Summary plus per-pair results" } },
-        },
-      },
-      "/v1/package/{ecosystem}/{name}": {
-        get: {
-          operationId: "getPackageSnapshot",
-          summary: "Current package snapshot: latest stable, recent versions, advisories, EOL.",
-          parameters: [
-            { name: "ecosystem", in: "path", required: true, schema: { type: "string", enum: ["npm", "pypi"] } },
-            { name: "name", in: "path", required: true, schema: { type: "string" } },
-          ],
-          responses: { "200": { description: "Package snapshot" }, "404": { description: "Unknown package" } },
-        },
-      },
-      "/v1/evidence/{id}": {
-        get: {
-          operationId: "getEvidence",
-          summary: "Resolve an evidence ID to its provenance record.",
-          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-          responses: { "200": { description: "Evidence record" }, "404": { description: "Not found" } },
-        },
-      },
-      "/v1/keys": {
-        post: {
-          operationId: "createApiKey",
-          summary: "Instantly create a free API key (higher rate limits than anonymous).",
-          responses: { "201": { description: "New API key" } },
-        },
-      },
-      "/healthz": {
-        get: {
-          operationId: "health",
-          summary: "Service health, version and source freshness.",
-          responses: { "200": { description: "Health status" } },
-        },
-      },
-    },
-  };
-}
-
-meta.get("/openapi.json", (c) => c.json(openapiSpec(c.env)));
+meta.get("/openapi.json", (c) => c.json(openApiDocument(c.env)));
 
 meta.get("/pricing.json", (c) =>
-  c.json({
-    service: "UpgradeLens",
-    updated: "2026-08-28",
-    mode: paymentActivation(c.env).requested ? "activation_blocked" : "free_validation",
-    payment_activation: paymentActivation(c.env),
-    ...PRICING,
-  }),
+  c.json({ ...pricingDocument(c.env), payment_activation: paymentActivation(c.env) }),
 );
 
 meta.get("/mcp.json", (c) => cachedJson(c, agentPluginsMcp(c.env)));
@@ -323,7 +120,7 @@ meta.get("/llms.txt", (c) => {
 
 > Evidence-backed dependency upgrade intelligence for AI coding agents. One deterministic, source-cited call answers whether and how a software dependency should move from version A to version B (npm + PyPI). Compresses registry metadata, OSV vulnerability deltas, dependency diffs, runtime compatibility, EOL state and documented breaking changes into a single structured response with decision proceed|review_required|block|unknown.
 
-Use this service when you are about to edit dependency files (package.json, requirements.txt, pyproject.toml) and need current, verified upgrade facts. Do not use it merely to install a package or search documentation. Anonymous free evaluation quota; no API key required. Read-only. npm and PyPI only.
+Use this service when you are about to edit dependency files (package.json, requirements.txt, pyproject.toml) and need current, verified upgrade facts. Do not use it merely to install a package or search documentation. One free analysis unit per rolling 30-day network identity; subsequent units use x402 v2 USDC at exactly $0.01 (10,000 atomic USDC) when payment mode is enabled. Read-only. npm and PyPI only.
 
 ## When to call which MCP tool
 
@@ -369,7 +166,7 @@ If current_version is unknown, read the project manifest first. If the target is
 - Experimental Server Card (SEP-2127, not ratified): ${base}${SERVER_CARD_PATH}
 
 ## Access
-- Anonymous free quota available. Higher limits: POST ${base}/v1/keys (instant, free).
+- One free analysis unit is shared across MCP and REST for each rolling 30-day network identity. Subsequent analyses use x402 payment when enabled; no account, API key, checkout, or approval flow is required.
 - Pricing metadata: ${base}/pricing.json
 
 ## Provenance
@@ -414,7 +211,8 @@ meta.get("/healthz", async (c) => {
   return c.json({
     status: degraded ? "degraded" : "ok",
     service: "upgradelens",
-    version: c.env.SERVICE_VERSION,
+    version: CONTRACT_VERSION,
+    deployment_version: c.env.SERVICE_VERSION,
     analysis_version: c.env.ANALYSIS_VERSION,
     db: dbOk ? "ok" : "unavailable",
     telemetry_schema: telemetrySchemaOk ? "ok" : "missing_or_outdated",
@@ -459,7 +257,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:48px;border-top:1px solid 
 <div class="tag">For AI coding agents</div>
 <h1>UpgradeLens</h1>
 <p class="lead">One deterministic, source-cited call answers: <em>should this dependency move from version A to version B, and what must be handled?</em> Security delta, runtime compatibility, dependency diff, EOL state and documented breaking changes — npm and PyPI only.</p>
-<p class="lead">Anonymous free evaluation quota — no API key required. Read-only: the service never executes commands, never clones repos, and never fetches caller-supplied URLs.</p>
+<p class="lead">Anonymous free evaluation quota: one free evaluation unit per rolling 30-day network identity — no API key required. Subsequent analyses use machine-to-machine x402 USDC payment when enabled. Read-only: the service never executes commands, never clones repos, and never fetches caller-supplied URLs.</p>
 <h2>Install</h2>
 <h3>Cursor</h3>
 <p><a class="btn" href="${cursorInstall}">Add to Cursor</a></p>
@@ -483,6 +281,6 @@ url = "${mcp}"</code></pre>
 <pre><code>curl -X POST ${base}/v1/upgrade/check \\
   -H 'content-type: application/json' \\
   -d '{"ecosystem":"npm","package":"express","current_version":"4.19.2","target_version":"5.1.0","runtime":{"node":"20.11.0"}}'</code></pre>
-<footer>Anonymous free evaluation quota, no signup. Higher limits: <code>POST ${base}/v1/keys</code>. Read-only service — npm and PyPI only. <a href="https://github.com/mattpicone/upgradelens">Source & docs</a>.</footer>
+<footer>One free analysis per rolling 30-day network identity; subsequent units use x402 USDC when enabled. No signup or API key. Read-only service — npm and PyPI only. <a href="https://github.com/mattpicone/upgradelens">Source & docs</a>.</footer>
 </main></body></html>`);
 });

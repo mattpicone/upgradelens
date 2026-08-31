@@ -15,7 +15,12 @@ import {
 import { checkUpgrade, planUpgrade, findTarget } from "../service";
 import type { AppVariables } from "../context";
 import { readJsonBody } from "../http/body";
-import { checkRateLimit } from "../telemetry";
+import { executeAnalysis } from "../payment";
+import { MachineError, machineError } from "../errors";
+import { CONTRACT_VERSION, MCP_BUSINESS_TOOL_NAMES, MCP_TOOLS } from "../contract";
+import { checkRateLimit, classifyMcpSource } from "../telemetry";
+
+export { MCP_BUSINESS_TOOL_NAMES, MCP_TOOLS } from "../contract";
 
 export const MCP_SUPPORTED_PROTOCOLS = [
   "2026-07-28",
@@ -84,258 +89,6 @@ export function applyMcpCorsHeaders(
   c.header("vary", "Origin");
   return true;
 }
-
-const CHECK_INPUT_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["ecosystem", "package", "current_version", "target_version"],
-  properties: {
-    ecosystem: {
-      type: "string",
-      enum: ["npm", "pypi"],
-      description: "Package ecosystem. Only npm and pypi are supported.",
-    },
-    package: { type: "string", description: "Exact registry package name." },
-    current_version: {
-      type: "string",
-      description: "The version currently used by the repository, e.g. 4.19.2",
-    },
-    target_version: {
-      type: "string",
-      description: "The candidate version to upgrade to, e.g. 5.1.0",
-    },
-    runtime: {
-      type: "object",
-      additionalProperties: false,
-      description:
-        "Optional runtime versions for compatibility checking, e.g. {\"node\":\"20.11.0\"} or {\"python\":\"3.12\"}.",
-      properties: {
-        node: { type: "string" },
-        python: { type: "string" },
-      },
-    },
-  },
-} as const;
-
-const COVERAGE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["registry", "osv", "deps_dev", "eol", "breaking_changes"],
-  properties: Object.fromEntries(
-    ["registry", "osv", "deps_dev", "eol", "breaking_changes"].map((name) => [
-      name,
-      {
-        type: "object",
-        required: ["status", "as_of"],
-        properties: {
-          status: {
-            type: "string",
-            enum: ["complete", "partial", "unavailable", "not_applicable", "not_covered"],
-          },
-          as_of: { type: ["string", "null"] },
-          detail: { type: "string" },
-        },
-      },
-    ]),
-  ),
-} as const;
-
-const VERSION_FACTS_SCHEMA = {
-  type: "object",
-  description: "Publication, yank, deprecation, and version-distance facts the engine already returns.",
-  properties: {
-    current_published_at: { type: ["string", "null"] },
-    target_published_at: { type: ["string", "null"] },
-    current_yanked: { type: "boolean" },
-    target_yanked: { type: "boolean" },
-    package_deprecated: { type: "boolean" },
-    target_deprecation_message: { type: ["string", "null"] },
-    is_downgrade: { type: "boolean" },
-    semver_jump: {
-      type: "string",
-      enum: ["major", "minor", "patch", "prerelease", "none", "unknown"],
-    },
-    versions_between: { type: ["integer", "null"] },
-  },
-} as const;
-
-const SECURITY_DELTA_SCHEMA = {
-  type: "object",
-  description: "OSV advisory sets affecting current, fixed by target, and still affecting target.",
-  properties: {
-    advisories_affecting_current: { type: "array", items: { type: "object" } },
-    advisories_fixed_by_target: { type: "array", items: { type: "object" } },
-    advisories_affecting_target: { type: "array", items: { type: "object" } },
-  },
-} as const;
-
-const COMPATIBILITY_SCHEMA = {
-  type: "object",
-  description: "Runtime engines, direct-dependency diff, and license change between the two versions.",
-  properties: {
-    runtime_supported: { type: ["boolean", "null"] },
-    runtime_notes: { type: "array", items: { type: "string" } },
-    dependency_changes: {
-      type: ["object", "null"],
-      properties: {
-        added: { type: "array", items: { type: "string" } },
-        removed: { type: "array", items: { type: "string" } },
-        changed: { type: "array", items: { type: "object" } },
-      },
-    },
-    license_change: { type: ["object", "null"] },
-  },
-} as const;
-
-const BREAKING_CHANGES_SCHEMA = {
-  type: "array",
-  description: "Documented breaking-change excerpts extracted from official release notes.",
-  items: {
-    type: "object",
-    properties: {
-      summary: { type: "string" },
-      severity: { type: "string" },
-      confidence: { type: "number" },
-      source_url: { type: "string" },
-    },
-  },
-} as const;
-
-const CHECK_OUTPUT_SCHEMA = {
-  type: "object",
-  required: [
-    "decision", "action_allowed", "risk_score", "ecosystem", "package", "current_version",
-    "target_version", "reasons", "claim_evidence", "evidence", "coverage", "confidence",
-    "freshness", "analysis_version",
-  ],
-  properties: {
-    decision: { type: "string", enum: ["proceed", "review_required", "block", "unknown"] },
-    action_allowed: { type: "boolean" },
-    risk_score: { type: "integer", minimum: 0, maximum: 100 },
-    ecosystem: { type: "string", enum: ["npm", "pypi"] },
-    package: { type: "string" },
-    current_version: { type: "string" },
-    target_version: { type: "string" },
-    latest_stable: { type: ["string", "null"] },
-    repository_url: { type: ["string", "null"] },
-    version_facts: VERSION_FACTS_SCHEMA,
-    security_delta: SECURITY_DELTA_SCHEMA,
-    compatibility: COMPATIBILITY_SCHEMA,
-    breaking_changes: BREAKING_CHANGES_SCHEMA,
-    reasons: { type: "array", items: { type: "string" } },
-    claim_evidence: { type: "array", items: { type: "object" } },
-    evidence: { type: "array", items: { type: "object" } },
-    coverage: COVERAGE_SCHEMA,
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    freshness: { type: "string" },
-    analysis_version: { type: "string" },
-    cache_hit: { type: "boolean" },
-  },
-  additionalProperties: true,
-} as const;
-
-const READ_ONLY_ANNOTATIONS = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-export const MCP_TOOLS = [
-  {
-    name: "check_dependency_upgrade",
-    title: "Assess a known dependency upgrade target (go/no-go)",
-    description:
-      "Use when asked for a go/no-go risk decision, cited assessment, or whether an existing npm or PyPI dependency can move from one exact installed version to one exact target version before editing. Returns decision/action_allowed plus source-cited vulnerability delta, registry-declared Node/Python compatibility, direct-dependency changes, EOL, and documented breaking-change evidence. Use plan_dependency_upgrade instead when migration, refactor, changelog, or test steps are requested. Do not use to choose a target, install a new package, inspect only one version, answer general documentation questions, or analyze another ecosystem. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
-    inputSchema: CHECK_INPUT_SCHEMA,
-    outputSchema: CHECK_OUTPUT_SCHEMA,
-    annotations: READ_ONLY_ANNOTATIONS,
-  },
-  {
-    name: "find_safe_upgrade_target",
-    title: "Rank upgrade candidates (not a safety verdict; full check required)",
-    description:
-      "Use only when asked which version to evaluate, rank, or recommend and an existing npm or PyPI dependency has an exact current version but no target yet. Ranks candidates using version distance and OSV advisory deltas; candidates are not declared safe. Every candidate requires either check_dependency_upgrade for a decision or plan_dependency_upgrade when migration steps are requested; the plan tool already includes the full check. This tool does not evaluate repository code or caller runtime compatibility. Do not use when a target is stated, for a new installation or simple latest-version lookup, or as authorization to modify files. Read-only and safe to retry; unavailable evidence is returned explicitly.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["ecosystem", "package", "current_version"],
-      properties: {
-        ecosystem: {
-          type: "string",
-          enum: ["npm", "pypi"],
-          description: "Package ecosystem. Only npm and pypi are supported.",
-        },
-        package: { type: "string", description: "Exact registry package name." },
-        current_version: { type: "string", description: "Version currently in use." },
-        max_major_jump: {
-          type: "integer",
-          minimum: 0,
-          description:
-            "Optional cap on how many major versions a candidate may jump. 0 = stay in the same major.",
-        },
-        allow_prerelease: { type: "boolean", description: "Include prerelease candidates." },
-      },
-    },
-    outputSchema: {
-      type: "object",
-      required: ["ecosystem", "package", "current_version", "candidates", "coverage", "confidence", "freshness", "analysis_version"],
-      properties: {
-        ecosystem: { type: "string", enum: ["npm", "pypi"] },
-        package: { type: "string" },
-        current_version: { type: "string" },
-        latest_stable: { type: ["string", "null"] },
-        candidates: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["version", "decision", "requires_full_check", "rationale"],
-            properties: {
-              version: { type: "string" },
-              decision: { type: "string", enum: ["review_required", "block", "unknown"] },
-              requires_full_check: { const: true },
-              rationale: { type: "array", items: { type: "string" } },
-              score: {
-                type: "number",
-                description: "Ranking score from version distance and advisory deltas; not a safety verdict.",
-              },
-              fixes_advisories: { type: "array", items: { type: "string" } },
-              introduces_advisories: { type: "array", items: { type: "string" } },
-              semver_jump: { type: "string" },
-              published_at: { type: ["string", "null"] },
-            },
-          },
-        },
-        evidence: { type: "array", items: { type: "object" } },
-        coverage: { type: "object" },
-        confidence: { type: "number" },
-        freshness: { type: "string" },
-        analysis_version: { type: "string" },
-      },
-      additionalProperties: true,
-    },
-    annotations: READ_ONLY_ANNOTATIONS,
-  },
-  {
-    name: "plan_dependency_upgrade",
-    title: "Plan a known dependency upgrade (migration/review checklist)",
-    description:
-      "Use when asked for a migration checklist, refactor actions, ordered review actions, changelog links, or test steps and both exact current and target versions are known. Returns the complete upgrade check plus source-linked migration_actions and changelog_urls; actions remain gated by action_allowed. Supports npm and PyPI only. Use check_dependency_upgrade instead for a go/no-go risk decision without steps. Do not use to choose a target, install a package, provide general tutorials, or modify files. Read-only and safe to retry; validation or unavailable evidence is returned explicitly.",
-    inputSchema: CHECK_INPUT_SCHEMA,
-    outputSchema: {
-      ...CHECK_OUTPUT_SCHEMA,
-      required: [...CHECK_OUTPUT_SCHEMA.required, "migration_actions", "changelog_urls"],
-      properties: {
-        ...CHECK_OUTPUT_SCHEMA.properties,
-        migration_actions: { type: "array", items: { type: "object" } },
-        changelog_urls: { type: "array", items: { type: "string" } },
-      },
-    },
-    annotations: READ_ONLY_ANNOTATIONS,
-  },
-] as const;
-
-export const MCP_BUSINESS_TOOL_NAMES = new Set<string>(MCP_TOOLS.map((tool) => tool.name));
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -420,56 +173,60 @@ function validateModernRequestHeaders(
   return null;
 }
 
-async function callTool(
+function normalizeMcpToolArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
+  switch (name) {
+    case "check_dependency_upgrade": {
+      const req: UpgradeCheckRequest = validateCheckRequest(args);
+      return req as unknown as Record<string, unknown>;
+    }
+    case "plan_dependency_upgrade": {
+      const req: UpgradeCheckRequest = validateCheckRequest(args);
+      return req as unknown as Record<string, unknown>;
+    }
+    case "find_safe_upgrade_target": {
+      const eco = validateEcosystem(args.ecosystem);
+      const pkg = validatePackageName(eco, args.package);
+      const cur = validateVersion("current_version", args.current_version);
+      const maxMajorJump =
+        typeof args.max_major_jump === "number" && args.max_major_jump >= 0
+          ? Math.floor(args.max_major_jump)
+          : undefined;
+      return {
+        ecosystem: eco,
+        package: pkg,
+        current_version: cur,
+        ...(maxMajorJump !== undefined ? { max_major_jump: maxMajorJump } : {}),
+        allow_prerelease: args.allow_prerelease === true,
+      };
+    }
+    default:
+      throw new ValidationError("name", `Unknown tool: ${name}`);
+  }
+}
+
+async function executeMcpTool(
   env: Env,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ structured: unknown; isError: boolean }> {
-  try {
-    switch (name) {
-      case "check_dependency_upgrade": {
-        const req: UpgradeCheckRequest = validateCheckRequest(args);
-        return { structured: await checkUpgrade(env, req), isError: false };
-      }
-      case "plan_dependency_upgrade": {
-        const req: UpgradeCheckRequest = validateCheckRequest(args);
-        return { structured: await planUpgrade(env, req), isError: false };
-      }
-      case "find_safe_upgrade_target": {
-        const eco = validateEcosystem(args.ecosystem);
-        const pkg = validatePackageName(eco, args.package);
-        const cur = validateVersion("current_version", args.current_version);
-        const maxMajorJump =
-          typeof args.max_major_jump === "number" && args.max_major_jump >= 0
-            ? Math.floor(args.max_major_jump)
-            : undefined;
-        const result = await findTarget(env, eco, pkg, cur, {
-          maxMajorJump,
+): Promise<Record<string, unknown>> {
+  switch (name) {
+    case "check_dependency_upgrade":
+      return (await checkUpgrade(env, args as unknown as UpgradeCheckRequest)) as unknown as Record<string, unknown>;
+    case "plan_dependency_upgrade":
+      return (await planUpgrade(env, args as unknown as UpgradeCheckRequest)) as unknown as Record<string, unknown>;
+    case "find_safe_upgrade_target":
+      return (await findTarget(
+        env,
+        args.ecosystem as "npm" | "pypi",
+        args.package as string,
+        args.current_version as string,
+        {
+          maxMajorJump: typeof args.max_major_jump === "number" ? args.max_major_jump : undefined,
           allowPrerelease: args.allow_prerelease === true,
-        });
-        return { structured: result, isError: false };
-      }
-      default:
-        return {
-          structured: { error: `Unknown tool: ${name}` },
-          isError: true,
-        };
-    }
-  } catch (e) {
-    if (e instanceof ValidationError) {
-      return {
-        structured: { error: e.message, field: e.field },
-        isError: true,
-      };
-    }
-    console.error("mcp_tool_execution_failed", {
-      tool: name,
-      error_type: e instanceof Error ? e.name : "unknown",
-    });
-    return {
-      structured: { error: "Internal analysis error. The service returned no fabricated data." },
-      isError: true,
-    };
+        },
+      )) as unknown as Record<string, unknown>;
+    default:
+      throw new ValidationError("name", `Unknown tool: ${name}`);
   }
 }
 
@@ -478,6 +235,10 @@ async function handleMessage(
   msg: JsonRpcRequest,
   setTool: (t: string) => void,
   modern: boolean,
+  caller: AppVariables["caller"],
+  requestId: string,
+  forcePayment: boolean,
+  businessEligible: boolean,
 ): Promise<unknown | null> {
   const id = msg.id ?? null;
   // Notifications get no response.
@@ -495,7 +256,7 @@ async function handleMessage(
         serverInfo: {
           name: "upgradelens",
           title: "UpgradeLens — dependency upgrade intelligence",
-          version: env.SERVICE_VERSION,
+          version: CONTRACT_VERSION,
         },
         instructions: MCP_INSTRUCTIONS,
       });
@@ -510,7 +271,7 @@ async function handleMessage(
             _meta: {
               "io.modelcontextprotocol/serverInfo": {
                 name: "upgradelens",
-                version: env.SERVICE_VERSION,
+                version: CONTRACT_VERSION,
               },
             },
             instructions: MCP_INSTRUCTIONS,
@@ -534,14 +295,70 @@ async function handleMessage(
       const name = (msg.params?.name as string) ?? "";
       const args = (msg.params?.arguments as Record<string, unknown>) ?? {};
       setTool(name);
-      const { structured, isError } = await callTool(env, name, args);
+      if (!MCP_BUSINESS_TOOL_NAMES.has(name)) {
+        const structured = machineError("invalid_input", `Unknown tool: ${name}`, false, { field: "name" });
+        return rpcResult(id, completeResult({ content: [{ type: "text", text: JSON.stringify(structured) }], structuredContent: structured, isError: true }, modern));
+      }
+      // The global middleware applies the cheap edge/minute fuse to every MCP
+      // request. Known business calls additionally consume one daily analysis
+      // unit here, after the tool name is known, so handshakes and probes do
+      // not exhaust the analysis budget.
+      const daily = await checkRateLimit(env, caller, { daily: true, skipEdge: true });
+      if (!daily.allowed) {
+        const structured = machineError("rate_limited", "The request rate is temporarily limited. Retry after the indicated delay.", true, {
+          retry_after_s: daily.retry_after_s,
+        });
+        return rpcResult(id, completeResult({ content: [{ type: "text", text: JSON.stringify(structured) }], structuredContent: structured, isError: true }, modern));
+      }
+      let outcome;
+      try {
+        // Normalize before hashing so semantically identical requests have the
+        // same idempotency fingerprint (and unrecognized fields never become
+        // part of a paid request's identity).
+        const normalizedArgs = normalizeMcpToolArgs(name, args);
+        outcome = await executeAnalysis({
+          env,
+          caller,
+          requestId,
+          operation: name as "check_dependency_upgrade" | "find_safe_upgrade_target" | "plan_dependency_upgrade",
+          args: normalizedArgs,
+          units: 1,
+          resource: `mcp://tool/${name}`,
+          paymentPayload:
+            (msg.params?._meta as Record<string, unknown> | undefined)?.["x402/payment"] as never ?? null,
+          businessEligible,
+          forcePayment,
+          execute: () => {
+            // Count an invocation only once validation has passed and the
+            // business handler is actually entered.
+            setTool(name);
+            return executeMcpTool(env, name, normalizedArgs);
+          },
+        });
+      } catch (error) {
+        console.error("mcp_tool_execution_failed", { tool: name, error_type: error instanceof Error ? error.name : "unknown", error_message: error instanceof Error ? error.message : String(error) });
+        const structured = error instanceof ValidationError
+          ? machineError(error.field === "ecosystem" ? "unsupported_ecosystem" : "invalid_input", error.message, false, { field: error.field })
+          : error instanceof MachineError
+            ? error.toJSON()
+            : machineError("internal_error", "Internal analysis error. The service returned no fabricated data.", true);
+        return rpcResult(id, completeResult({ content: [{ type: "text", text: JSON.stringify(structured) }], structuredContent: structured, isError: true }, modern));
+      }
+      if (outcome.kind === "error") {
+        return rpcResult(id, completeResult({ content: [{ type: "text", text: JSON.stringify(outcome.body) }], structuredContent: outcome.body, isError: true }, modern));
+      }
+      if (outcome.kind === "payment_required") {
+        return rpcResult(id, completeResult({ content: [{ type: "text", text: JSON.stringify(outcome.paymentRequired) }], structuredContent: outcome.paymentRequired, isError: true }, modern));
+      }
+      const structured = outcome.result;
       return rpcResult(
         id,
         completeResult(
           {
             content: [{ type: "text", text: JSON.stringify(structured) }],
             structuredContent: structured,
-            isError,
+            isError: false,
+            ...(outcome.paymentResponse ? { _meta: { "x402/payment-response": outcome.paymentResponse } } : {}),
           },
           modern,
         ),
@@ -559,7 +376,9 @@ async function handleMessage(
 
 export async function handleMcp(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
+  envOverride: Partial<Pick<Env, "PAYMENT_MODE">> = {},
 ): Promise<Response> {
+  const runtimeEnv = Object.keys(envOverride).length > 0 ? { ...c.env, ...envOverride } : c.env;
   c.set("mcpMethod", `http:${c.req.method.toLowerCase()}`);
   if (!applyMcpCorsHeaders(c)) {
     c.set("mcpErrorKind", "origin_rejected");
@@ -589,7 +408,12 @@ export async function handleMcp(
     return c.json(rpcError(null, -32600, "JSON-RPC batches are not accepted by Streamable HTTP."), 400);
   }
 
-  const setTool = (t: string) => c.set("mcpTool", t);
+  const setTool = (t: string) => {
+    c.set("mcpTool", t);
+    // This marks a known business-tool request. Semantic success is tracked
+    // separately from the returned `isError` flag.
+    c.set("mcpToolInvoked", MCP_BUSINESS_TOOL_NAMES.has(t));
+  };
   const msg = payload as JsonRpcRequest;
   if (msg?.jsonrpc !== "2.0" || typeof msg.method !== "string") {
     c.set("mcpErrorKind", "invalid_request");
@@ -635,21 +459,30 @@ export async function handleMcp(
     const name = typeof msg.params?.name === "string" ? msg.params.name : "";
     c.set("mcpTool", name);
     const knownTool = MCP_BUSINESS_TOOL_NAMES.has(name);
-    if (knownTool) {
-      const daily = await checkRateLimit(c.env, c.get("caller"), { skipEdge: true });
-      c.header("x-ratelimit-remaining-day", String(daily.remaining_day));
-      if (!daily.allowed) {
-        c.set("mcpErrorKind", "rate_limited");
-        c.set("mcpRpcErrorCode", -32000);
-        return c.json(
-          rpcError(msg.id ?? null, -32000, "Daily analysis quota exceeded; retry later."),
-          429,
-        );
-      }
-    }
-    c.set("mcpToolInvoked", knownTool);
+    c.set("mcpToolInvoked", false);
   }
-  const response = await handleMessage(c.env, msg, setTool, modern);
+  const forcePayment = c.req.header("x-upgradelens-payment-probe") === "true";
+  const requestedTool = msg.method === "tools/call" && typeof msg.params?.name === "string"
+    ? msg.params.name
+    : undefined;
+  const businessEligible =
+    new URL(c.req.url).pathname !== "/mcp-testnet" &&
+    classifyMcpSource(
+      c.get("caller").internal,
+      c.get("caller").authState,
+      c.req.header("user-agent"),
+      requestedTool,
+    ).trafficClass === "external";
+  const response = await handleMessage(
+    runtimeEnv,
+    msg,
+    setTool,
+    modern,
+    c.get("caller"),
+    c.get("requestId"),
+    forcePayment,
+    businessEligible,
+  );
   if (response === null) return c.body(null, 202);
   const rpc = response as {
     result?: { isError?: boolean; structuredContent?: unknown };
@@ -664,12 +497,19 @@ export async function handleMcp(
     const structured = rpc.result.structuredContent as Record<string, unknown> | undefined;
     if (structured) {
       if (rpc.result.isError === true) {
-        const errorText = typeof structured.error === "string" ? structured.error : "";
+        const errorCode = String((structured.error as Record<string, unknown> | undefined)?.code);
+        const errorText = typeof structured.error === "string"
+          ? structured.error
+          : typeof (structured.error as Record<string, unknown> | undefined)?.message === "string"
+            ? String((structured.error as Record<string, unknown>).message)
+            : "";
         c.set(
           "mcpErrorKind",
           errorText.startsWith("Unknown tool:")
             ? "unknown_tool"
-            : "field" in structured
+            : errorCode === "rate_limited"
+              ? "rate_limited"
+              : ["invalid_input", "unsupported_ecosystem"].includes(errorCode)
               ? "validation_error"
               : "service_error",
         );

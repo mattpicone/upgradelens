@@ -3,8 +3,27 @@ export interface Env {
   ANALYSIS_VERSION: string;
   SERVICE_VERSION: string;
   PAYMENTS_ENABLED: string;
+  PAYMENT_MODE?: "validation" | "testnet" | "mainnet" | "paused";
+  MCP_TESTNET_TOKEN?: string;
   PUBLIC_BASE_URL: string;
   X402_PAY_TO?: string;
+  TRIAL_HMAC_SECRET?: string;
+  PAYMENT_RECOVERY_SECRET?: string;
+  CDP_API_KEY_ID?: string;
+  CDP_API_KEY_SECRET?: string;
+  CDP_FACILITATOR_URL?: string;
+  /** Conservative known facilitator/settlement cost per analysis, in USD micros. */
+  KNOWN_UNIT_COST_MICROS?: string;
+  /** Release fingerprints copied from the attested build before mainnet. */
+  RELEASE_GIT_SHA?: string;
+  RELEASE_LOCKFILE_HASH?: string;
+  RELEASE_SUITE_HASH?: string;
+  BAZAAR_STATE?:
+    | "absent"
+    | "testnet_indexed"
+    | "production_awaiting_first_settlement"
+    | "production_indexed"
+    | "curated";
   ANON_RATE_LIMITER?: RateLimit;
   KEY_RATE_LIMITER?: RateLimit;
   OWNER_TOKEN?: string;
@@ -14,6 +33,27 @@ export interface Env {
 export type Ecosystem = "npm" | "pypi";
 
 export type Decision = "proceed" | "review_required" | "block" | "unknown";
+
+export interface BillingMetadata {
+  mode: "validation" | "testnet" | "mainnet" | "paused";
+  units: number;
+  price_usd: number;
+  trial_remaining: number | null;
+  network: string | null;
+  payment_status:
+    | "validation_free"
+    | "trial"
+    | "settled"
+    | "cached_settlement"
+    | "owner"
+    | "unavailable";
+}
+
+export interface MachineResultFields {
+  next_action: string;
+  recommended_target?: string | null;
+  billing: BillingMetadata;
+}
 
 export type CoverageStatus =
   | "complete"

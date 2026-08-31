@@ -288,6 +288,29 @@ describe("MCP protocol", () => {
     expect(res.status).toBe(405);
   });
 
+  it("does not expose the controlled testnet identity unless explicitly configured", async () => {
+    const res = await app.request("/mcp-testnet", { method: "POST" }, env, fakeCtx);
+    expect(res.status).toBe(404);
+    expect((await res.json() as any).error.code).toBe("not_found");
+  });
+
+  it("keeps the challenge-only probe from entering the validation handler", async () => {
+    const res = await app.request(
+      "/mcp",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-upgradelens-payment-probe": "true", "user-agent": "UpgradeLens-Payment-Probe/1.0" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "check_dependency_upgrade", arguments: { ecosystem: "npm", package: "express", current_version: "4.19.2", target_version: "5.1.0" } } }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.result.isError).toBe(true);
+    expect(body.result.structuredContent.error.code).toBe("payment_service_unavailable");
+  });
+
   it("returns isError result for invalid tool arguments (not a protocol error)", async () => {
     const res = await rpc({
       jsonrpc: "2.0",
@@ -297,7 +320,7 @@ describe("MCP protocol", () => {
     });
     const body = (await res.json()) as any;
     expect(body.result.isError).toBe(true);
-    expect(body.result.structuredContent.error).toMatch(/Unsupported ecosystem/);
+    expect(body.result.structuredContent.error.message).toMatch(/Unsupported ecosystem/);
   });
 
   it("returns isError for unknown tool names", async () => {

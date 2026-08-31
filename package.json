@@ -1,16 +1,25 @@
 {
   "name": "upgradelens",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "Evidence-backed dependency upgrade intelligence for AI coding agents. REST API + remote MCP server.",
   "type": "module",
+  "overrides": {
+    "axios": "1.18.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:selection:score": "node scripts/score-mcp-selection.mjs",
     "verify:production:mcp": "node scripts/verify-production-mcp.mjs",
+    "operator:status": "node scripts/operator-status.mjs",
+    "contract:check": "node scripts/check-contract.mjs",
+    "buyer:harness": "node scripts/buyer-harness.mjs",
+    "payment:probe": "node scripts/probe-payment.mjs",
+    "rollout:attest": "node scripts/create-rollout-attestation.mjs",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 execute upgradelens --local --file=./migrations/0001_init.sql",
     "db:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql",
@@ -21,16 +30,26 @@
     "db:dashboard-reset:local": "wrangler d1 execute upgradelens --local --file=./migrations/0005_dashboard_reset.sql",
     "db:dashboard-reset:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0005_dashboard_reset.sql",
     "db:validation:start:local": "wrangler d1 execute upgradelens --local --file=./migrations/0004_activate_validation.sql",
-    "db:validation:start:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql"
+    "db:validation:start:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0004_activate_validation.sql",
+    "db:payments:local": "wrangler d1 execute upgradelens --local --file=./migrations/0006_machine_payments.sql",
+    "db:payments:remote": "wrangler d1 execute upgradelens --remote --file=./migrations/0006_machine_payments.sql"
   },
   "dependencies": {
+    "@coinbase/cdp-sdk": "1.55.0",
+    "@x402/core": "2.24.0",
+    "@x402/evm": "2.24.0",
+    "@x402/extensions": "2.24.0",
+    "@x402/svm": "2.24.0",
     "hono": "^4.6.0",
     "semver": "^7.8.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260828.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/semver": "^7.8.0",
+    "@x402/mcp": "2.24.0",
     "typescript": "^5.7.0",
+    "viem": "2.56.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.0.0"
   }

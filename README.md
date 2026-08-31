@@ -130,8 +130,9 @@ curl -X POST https://upgradelens.mattpicone.workers.dev/v1/upgrade/check \
   }'
 ```
 
-Higher limits with an instant free key (`POST /v1/keys`). The evaluation quota
-needs no key.
+One anonymous evaluation unit is shared across MCP and REST for a rolling
+30-day network identity. Additional units use x402 v2 USDC at $0.01 per
+analysis (10,000 atomic USDC); `POST /v1/keys` is intentionally retired.
 
 ## MCP tools
 
@@ -145,6 +146,15 @@ Response (abbreviated):
 
 ```json
 {
+  "next_action": "review_migration_plan",
+  "billing": {
+    "mode": "validation",
+    "units": 1,
+    "price_usd": 0.01,
+    "trial_remaining": null,
+    "network": null,
+    "payment_status": "validation_free"
+  },
   "decision": "review_required",
   "action_allowed": false,
   "risk_score": 37,

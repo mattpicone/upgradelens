@@ -12,6 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify immutable v0.3.0 contract before publishing
+        run: npm run contract:check
       - name: Install mcp-publisher
         run: |
           curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
@@ -22,4 +29,20 @@ jobs:
       - name: Verify listing
         run: |
           sleep 5
-          curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.mattpicone/upgradelens" | head -c 1200
+          curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.mattpicone/upgradelens" | node -e '
+            let raw="";
+            process.stdin.on("data", d => raw += d).on("end", () => {
+              const body = JSON.parse(raw);
+              let found = false;
+              const visit = value => {
+                if (!value || typeof value !== "object") return;
+                if (value.name === "io.github.mattpicone/upgradelens" && value.version === "0.3.0") found = true;
+                for (const child of Object.values(value)) visit(child);
+              };
+              visit(body);
+              if (!found) {
+                console.error("Exact v0.3.0 Registry record was not returned after publish.");
+                process.exit(1);
+              }
+            });
+          '

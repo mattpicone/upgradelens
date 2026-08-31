@@ -1,10 +1,9 @@
 import fs from "node:fs";
 
-const [corpusPath = "evals/mcp-tool-selection.json", resultsPath] = process.argv.slice(2);
-if (!resultsPath) {
-  console.error("Usage: node scripts/score-mcp-selection.mjs [corpus.json] results.json");
-  process.exit(2);
-}
+const [
+  corpusPath = "evals/mcp-tool-selection.json",
+  resultsPath = "evals/mcp-tool-selection-results.json",
+] = process.argv.slice(2);
 
 const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
 const resultDocument = JSON.parse(fs.readFileSync(resultsPath, "utf8"));

@@ -11,27 +11,36 @@ import {
   validateVersion,
 } from "../validate";
 import { checkUpgrade, planUpgrade, findTarget, getEvidence } from "../service";
-import { createApiKey } from "../billing";
 import { fetchPackageVersions } from "../sources/depsdev";
 import { queryOsv } from "../sources/osv";
 import { cycleStatus, eolProductFor, fetchEol } from "../sources/endoflife";
 import { cmpVersions, isPre } from "../engine/analyze";
 import type { AppVariables } from "../context";
 import { readJsonBody } from "../http/body";
-import { checkKeyIssuance, checkRateLimit } from "../telemetry";
+import { executeAnalysis, paymentPayloadFromHeader, paymentRequiredHeader, paymentResponseHeader } from "../payment";
+import { MachineError, machineError } from "../errors";
+import { checkRateLimit } from "../telemetry";
 
 export const api = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 function errJson(status: number, code: string, message: string, field?: string) {
   return Response.json(
-    { error: { code, message, ...(field ? { field } : {}) } },
+    machineError(
+      code === "upstream_unavailable" ? "upstream_failure" : code,
+      message,
+      status === 429 || status >= 500,
+      field ? { field } : undefined,
+    ),
     { status },
   );
 }
 
 function handleValidation(e: unknown): Response {
+  if (e instanceof MachineError) {
+    return Response.json(e.toJSON(), { status: e.status });
+  }
   if (e instanceof ValidationError) {
-    return errJson(400, "invalid_request", e.message, e.field);
+    return errJson(400, e.field === "ecosystem" ? "unsupported_ecosystem" : "invalid_input", e.message, e.field);
   }
   throw e;
 }
@@ -43,7 +52,27 @@ api.post("/upgrade/check", async (c) => {
   try {
     const req = validateCheckRequest(body);
     c.set("meta", { ecosystem: req.ecosystem, package: req.package });
-    const result = await checkUpgrade(c.env, req);
+    const outcome = await executeAnalysis({
+      env: c.env,
+      caller: c.get("caller"),
+      requestId: c.get("requestId"),
+      operation: "check_dependency_upgrade",
+      args: req as unknown as Record<string, unknown>,
+      units: 1,
+      resource: `${c.env.PUBLIC_BASE_URL}/v1/upgrade/check`,
+      paymentPayload: paymentPayloadFromHeader(c.req.header("payment-signature") ?? null),
+      businessEligible: c.get("businessEligible"),
+      execute: () => checkUpgrade(c.env, req),
+    });
+    if (outcome.kind === "payment_required") {
+      c.header("payment-required", paymentRequiredHeader(outcome.paymentRequired));
+      c.header("cache-control", "no-store");
+      return c.json(machineError("payment_required", "Payment is required for this analysis.", true), 402);
+    }
+    if (outcome.kind === "error") return c.json(outcome.body, outcome.status as 400);
+    const result = outcome.result;
+    if (outcome.paymentResponse) c.header("payment-response", paymentResponseHeader(outcome.paymentResponse));
+    c.header("cache-control", "no-store");
     c.set("cacheHit", result.cache_hit === true);
     c.set("unknownResult", result.decision === "unknown");
     return c.json(result);
@@ -59,7 +88,27 @@ api.post("/upgrade/plan", async (c) => {
   try {
     const req = validateCheckRequest(body);
     c.set("meta", { ecosystem: req.ecosystem, package: req.package });
-    const result = await planUpgrade(c.env, req);
+    const outcome = await executeAnalysis({
+      env: c.env,
+      caller: c.get("caller"),
+      requestId: c.get("requestId"),
+      operation: "plan_dependency_upgrade",
+      args: req as unknown as Record<string, unknown>,
+      units: 1,
+      resource: `${c.env.PUBLIC_BASE_URL}/v1/upgrade/plan`,
+      paymentPayload: paymentPayloadFromHeader(c.req.header("payment-signature") ?? null),
+      businessEligible: c.get("businessEligible"),
+      execute: () => planUpgrade(c.env, req),
+    });
+    if (outcome.kind === "payment_required") {
+      c.header("payment-required", paymentRequiredHeader(outcome.paymentRequired));
+      c.header("cache-control", "no-store");
+      return c.json(machineError("payment_required", "Payment is required for this analysis.", true), 402);
+    }
+    if (outcome.kind === "error") return c.json(outcome.body, outcome.status as 400);
+    const result = outcome.result;
+    if (outcome.paymentResponse) c.header("payment-response", paymentResponseHeader(outcome.paymentResponse));
+    c.header("cache-control", "no-store");
     c.set("cacheHit", result.cache_hit === true);
     c.set("unknownResult", result.decision === "unknown");
     return c.json(result);
@@ -86,29 +135,55 @@ api.post("/upgrade/batch", async (c) => {
   try {
     const reqs = pairs.map((p) => validateCheckRequest(p));
     if (reqs.length > 1) {
-      // The middleware already charges one analysis unit for the request. A
-      // batch must consume the remaining units too, otherwise it multiplies
-      // upstream and D1 work without consuming the corresponding daily quota.
+      // The global middleware accounts for the first unit. Add the remaining
+      // pair units before doing any upstream work so a batch cannot bypass
+      // caller/global daily fuses.
       const extra = await checkRateLimit(c.env, c.get("caller"), {
         skipEdge: true,
         units: reqs.length - 1,
       });
       c.header("x-ratelimit-remaining-day", String(extra.remaining_day));
       if (!extra.allowed) {
-        return errJson(429, "rate_limited", "Daily analysis quota exceeded; retry later.");
+        return errJson(429, "rate_limited", "The request rate is temporarily limited. Retry after the indicated delay.");
       }
     }
-    const results = await Promise.all(reqs.map((r) => checkUpgrade(c.env, r)));
-    const summary = {
-      total: results.length,
-      proceed: results.filter((r) => r.decision === "proceed").length,
-      review_required: results.filter((r) => r.decision === "review_required").length,
-      block: results.filter((r) => r.decision === "block").length,
-      unknown: results.filter((r) => r.decision === "unknown").length,
+    const execute = async () => {
+      const results = await Promise.all(reqs.map((r) => checkUpgrade(c.env, r)));
+      return {
+        summary: {
+          total: results.length,
+          proceed: results.filter((r) => r.decision === "proceed").length,
+          review_required: results.filter((r) => r.decision === "review_required").length,
+          block: results.filter((r) => r.decision === "block").length,
+          unknown: results.filter((r) => r.decision === "unknown").length,
+        },
+        results,
+      };
     };
+    const outcome = await executeAnalysis({
+      env: c.env,
+      caller: c.get("caller"),
+      requestId: c.get("requestId"),
+      operation: "batch_check_upgrades",
+      args: { pairs: reqs },
+      units: reqs.length,
+      resource: `${c.env.PUBLIC_BASE_URL}/v1/upgrade/batch`,
+      paymentPayload: paymentPayloadFromHeader(c.req.header("payment-signature") ?? null),
+      businessEligible: c.get("businessEligible"),
+      execute,
+    });
+    if (outcome.kind === "payment_required") {
+      c.header("payment-required", paymentRequiredHeader(outcome.paymentRequired));
+      c.header("cache-control", "no-store");
+      return c.json(machineError("payment_required", `Payment is required for ${reqs.length} analysis units.`, true), 402);
+    }
+    if (outcome.kind === "error") return c.json(outcome.body, outcome.status as 400);
+    const { results, summary } = outcome.result;
+    if (outcome.paymentResponse) c.header("payment-response", paymentResponseHeader(outcome.paymentResponse));
+    c.header("cache-control", "no-store");
     c.set("cacheHit", results.every((r) => r.cache_hit === true));
     c.set("unknownResult", summary.unknown > 0);
-    return c.json({ summary, results });
+    return c.json(outcome.result);
   } catch (e) {
     return handleValidation(e);
   }
@@ -128,10 +203,37 @@ api.post("/upgrade/target", async (c) => {
         ? Math.floor(b.max_major_jump)
         : undefined;
     c.set("meta", { ecosystem: eco, package: pkg });
-    const result = await findTarget(c.env, eco, pkg, cur, {
-      maxMajorJump,
-      allowPrerelease: b.allow_prerelease === true,
+    const normalized = {
+      ecosystem: eco,
+      package: pkg,
+      current_version: cur,
+      ...(maxMajorJump !== undefined ? { max_major_jump: maxMajorJump } : {}),
+      allow_prerelease: b.allow_prerelease === true,
+    };
+    const outcome = await executeAnalysis({
+      env: c.env,
+      caller: c.get("caller"),
+      requestId: c.get("requestId"),
+      operation: "find_safe_upgrade_target",
+      args: normalized,
+      units: 1,
+      resource: `${c.env.PUBLIC_BASE_URL}/v1/upgrade/target`,
+      paymentPayload: paymentPayloadFromHeader(c.req.header("payment-signature") ?? null),
+      businessEligible: c.get("businessEligible"),
+      execute: () => findTarget(c.env, eco, pkg, cur, {
+        maxMajorJump,
+        allowPrerelease: b.allow_prerelease === true,
+      }),
     });
+    if (outcome.kind === "payment_required") {
+      c.header("payment-required", paymentRequiredHeader(outcome.paymentRequired));
+      c.header("cache-control", "no-store");
+      return c.json(machineError("payment_required", "Payment is required for this analysis.", true), 402);
+    }
+    if (outcome.kind === "error") return c.json(outcome.body, outcome.status as 400);
+    const result = outcome.result;
+    if (outcome.paymentResponse) c.header("payment-response", paymentResponseHeader(outcome.paymentResponse));
+    c.header("cache-control", "no-store");
     c.set("unknownResult", result.candidates.length === 0 && result.confidence < 0.5);
     return c.json(result);
   } catch (e) {
@@ -204,29 +306,13 @@ api.get("/evidence/:id", async (c) => {
   return c.json(row);
 });
 
-api.post("/keys", async (c) => {
-  let label: string | null = null;
-  if (c.req.raw.body) {
-    const parsed = await readJsonBody(c.req.raw);
-    if (!parsed.ok) return errJson(parsed.status, parsed.code, parsed.message);
-    const body = parsed.data as { label?: string };
-    label = typeof body?.label === "string" ? body.label : null;
-  }
-  const issuance = await checkKeyIssuance(c.env, c.get("caller"));
-  if (!issuance.allowed) {
-    return errJson(
-      429,
-      "key_issuance_limited",
-      "Free key issuance is limited to two keys per anonymous client per day; keyed clients cannot mint additional keys.",
-    );
-  }
-  const created = await createApiKey(c.env, label);
-  return c.json(
-    {
-      ...created,
-      usage: "Send as 'Authorization: Bearer <key>' or 'X-API-Key: <key>'.",
-      note: "Free plan. Store this key — it is not retrievable later.",
-    },
-    201,
-  );
-});
+api.post("/keys", (c) =>
+  c.json(
+    machineError(
+      "not_found",
+      "New API keys are no longer issued. Accounts and keys are not required; use the shared rolling trial and x402 payment flow.",
+      false,
+    ),
+    410,
+  ),
+);

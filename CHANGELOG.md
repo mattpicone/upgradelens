@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — 2026-08-30
+
+Machine-only discovery, contract, and payment release.
+
+- Added a canonical v0.3.0 catalog generating MCP tools, OpenAPI, pricing,
+  Registry/Bazaar metadata, examples, and immutable version checks.
+- Added shared MCP/REST execution gating with one HMAC-scoped rolling trial
+  unit and exact x402 v2 USDC pricing ($0.01 / 10,000 atomic USDC).
+- Added durable D1 business calls, trial entitlements, payment attempts/events,
+  encrypted reconciliation state, integer-micros revenue ledger, and rollout
+  attestations; mainnet remains fail-closed until owner credentials and a
+  matching testnet attestation exist.
+- Added unseeded buyer discovery harness, challenge-only payment probe,
+  operator status checks, and a bounded one-minute reconciliation cron.
+
 ## 0.2.2 — 2026-08-30
 
 Remote-client compatibility and install-path release.

@@ -4,6 +4,7 @@ export interface AppVariables {
   caller: CallerIdentity;
   requestId: string;
   startedAt: number;
+  businessEligible: boolean;
   meta?: { ecosystem?: string; package?: string };
   cacheHit?: boolean;
   unknownResult?: boolean;

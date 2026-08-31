@@ -23,7 +23,7 @@ export function fakeEnv(overrides: Partial<Env> = {}): Env {
   return {
     DB: fakeD1(),
     ANALYSIS_VERSION: "2",
-    SERVICE_VERSION: "0.2.0-test",
+    SERVICE_VERSION: "0.3.0-test",
     PAYMENTS_ENABLED: "false",
     PUBLIC_BASE_URL: "https://upgradelens.test",
     OWNER_TOKEN: "test-owner-token",

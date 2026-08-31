@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.mattpicone/upgradelens",
   "title": "UpgradeLens",
-  "description": "npm/PyPI dependency upgrade intelligence: OSV/CVE, breaking changes, EOL, runtime compat.",
-  "version": "0.2.2",
+  "description": "Read-only npm/PyPI dependency upgrade decisions, target ranking, and migration plans with current source citations, one free analysis, and autonomous x402 USDC payment.",
+  "version": "0.3.0",
   "websiteUrl": "https://upgradelens.mattpicone.workers.dev",
   "repository": {
     "url": "https://github.com/mattpicone/upgradelens",
@@ -14,5 +14,18 @@
       "type": "streamable-http",
       "url": "https://upgradelens.mattpicone.workers.dev/mcp"
     }
-  ]
+  ],
+  "_meta": {
+    "publisher": "Matt Picone",
+    "ecosystems": ["npm", "pypi"],
+    "behavior": "read-only",
+    "source_citations": true,
+    "pricing_url": "https://upgradelens.mattpicone.workers.dev/pricing.json",
+    "x402": true,
+    "operations": [
+      "check_dependency_upgrade",
+      "find_safe_upgrade_target",
+      "plan_dependency_upgrade"
+    ]
+  }
 }

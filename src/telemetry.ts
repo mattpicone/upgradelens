@@ -84,6 +84,46 @@ export async function hashIdentity(input: string): Promise<string> {
     .join("");
 }
 
+function normalizedNetworkIdentity(request: Request): string {
+  const raw =
+    request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "0.0.0.0";
+  const candidate = raw.trim().toLowerCase();
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(candidate)) {
+    const octets = candidate.split(".").map((part) => Number(part));
+    if (octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      return octets.join(".");
+    }
+  }
+  try {
+    const parsed = new URL(`http://[${candidate}]`);
+    return parsed.hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return "0.0.0.0";
+  }
+}
+
+export async function deriveTrialSubject(env: Env, request: Request): Promise<string> {
+  const identity = normalizedNetworkIdentity(request);
+  if (!env.TRIAL_HMAC_SECRET) return `legacy:${await hashIdentity(identity)}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(env.TRIAL_HMAC_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`upgradelens-trial-v1:${identity}`),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export async function hashApiKey(input: string): Promise<string> {
   const data = new TextEncoder().encode("ul-key-v2:" + input);
   const digest = await crypto.subtle.digest("SHA-256", data);
@@ -99,9 +139,11 @@ export interface CallerIdentity {
   plan: string;
   dailyQuota: number;
   authState: AuthState;
+  trialSubject?: string;
 }
 
 export async function identifyCaller(env: Env, request: Request): Promise<CallerIdentity> {
+  const trialSubject = await deriveTrialSubject(env, request);
   const auth = request.headers.get("authorization") ?? "";
   const headerKey = request.headers.get("x-api-key") ?? "";
   const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
@@ -117,6 +159,7 @@ export async function identifyCaller(env: Env, request: Request): Promise<Caller
         plan: "owner",
         dailyQuota: 1_000_000,
         authState: "owner",
+        trialSubject,
       };
     }
     const keyHash = await hashApiKey(rawKey);
@@ -135,6 +178,7 @@ export async function identifyCaller(env: Env, request: Request): Promise<Caller
           plan: row.plan,
           dailyQuota: row.daily_quota,
           authState: "valid_key",
+          trialSubject,
         };
       }
     } catch {
@@ -154,6 +198,7 @@ export async function identifyCaller(env: Env, request: Request): Promise<Caller
     plan: "anon",
     dailyQuota: 100,
     authState: rawKey ? "invalid_key" : "none",
+    trialSubject,
   };
 }
 
@@ -163,7 +208,7 @@ export async function identifyCaller(env: Env, request: Request): Promise<Caller
 // with an unclassified user-agent remains external.
 const REGISTRY_UA = /(?:registry|verifymcp|proofbench)/i;
 const AUDIT_UA =
-  /(?:sasame-mcp-audit|mcpscan|sentineloracle|endpointaudit|mcpgrade|agentgrade|mcpqueen-grader)/i;
+  /(?:sasame-mcp-audit|mcpscan|sentineloracle|endpointaudit|mcpgrade|agentgrade|mcpqueen-grader|upgradelens-payment-probe)/i;
 const HEALTH_UA =
   /(?:mcpbeat|mcpwatch|mcp-observatory|stats-prober|liveness-probe|reliability-bureau-spike)/i;
 const CRAWLER_UA =

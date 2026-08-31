@@ -362,4 +362,41 @@ describe("dashboard SQL classification boundaries", () => {
     expect(stats.trafficByClass.every((row) => row.records <= 1)).toBe(true);
     sqlite.close();
   });
+
+  it("uses durable business units for headlines and excludes testnet/owner rows", async () => {
+    const { sqlite, d1 } = sqliteD1();
+    sqlite.exec(`
+      CREATE TABLE business_calls (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        units INTEGER NOT NULL,
+        execution_state TEXT NOT NULL,
+        result_json TEXT,
+        delivery_state TEXT NOT NULL,
+        access_type TEXT NOT NULL,
+        business_eligible INTEGER NOT NULL,
+        subject_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    const now = new Date().toISOString();
+    const insert = sqlite.prepare(`
+      INSERT INTO business_calls
+        (id, request_id, operation, units, execution_state, result_json,
+         delivery_state, access_type, business_eligible, subject_hash, created_at, updated_at)
+      VALUES (?, ?, 'check_dependency_upgrade', ?, 'complete', '{}', ?, ?, ?, 'subject', ?, ?)
+    `);
+    insert.run('validation', 'validation', 1, 'delivered', 'validation_free', 1, now, now);
+    insert.run('testnet', 'testnet', 1, 'delivered', 'paid', 0, now, now);
+    insert.run('owner', 'owner', 1, 'delivered', 'owner', 0, now, now);
+    insert.run('withheld', 'withheld', 2, 'withheld', 'paid', 1, now, now);
+
+    const stats = await collectStats({ DB: d1 });
+    expect(stats.businessCallsAvailable).toBe(true);
+    expect(stats.overview.totalCalls).toBe(3);
+    expect(stats.total.success).toBe(1);
+    sqlite.close();
+  });
 });

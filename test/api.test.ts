@@ -15,6 +15,47 @@ const post = (path: string, body: unknown) =>
   );
 
 describe("REST validation and errors", () => {
+  it("rejects a malformed PAYMENT-SIGNATURE instead of treating it as absent", async () => {
+    const res = await app.request(
+      "/v1/upgrade/check",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "payment-signature": "not-valid-base64-or-json" },
+        body: JSON.stringify({
+          ecosystem: "npm",
+          package: "express",
+          current_version: "4.19.2",
+          target_version: "5.1.0",
+        }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("payment_invalid");
+  });
+
+  it("rejects a base64-encoded non-object PAYMENT-SIGNATURE", async () => {
+    const res = await app.request(
+      "/v1/upgrade/check",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "payment-signature": btoa("null") },
+        body: JSON.stringify({
+          ecosystem: "npm",
+          package: "express",
+          current_version: "4.19.2",
+          target_version: "5.1.0",
+        }),
+      },
+      env,
+      fakeCtx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error.code).toBe("payment_invalid");
+  });
+
   it("rejects invalid JSON bodies", async () => {
     const res = await app.request(
       "/v1/upgrade/check",
@@ -129,12 +170,13 @@ describe("meta surfaces", () => {
     expect(text).toMatch(/read the project manifest first/);
   });
 
-  it("serves pricing.json in free_validation mode with $0 posture", async () => {
+  it("serves pricing.json with the v0.3 machine payment contract", async () => {
     const res = await app.request("/pricing.json", {}, env, fakeCtx);
     const body = (await res.json()) as any;
-    expect(body.mode).toBe("free_validation");
-    expect(body.paid.status).toBe("blocked_pending_payment_implementation");
-    expect(body.payment_activation.ready).toBe(false);
+    expect(body.mode).toBe("validation");
+    expect(body.unit).toEqual({ name: "analysis", price_usd: 0.01, atomic_usdc: "10000" });
+    expect(body.free_entitlement).toMatchObject({ units: 1, rolling_days: 30 });
+    expect(body.payment_activation.ready).toBe(true);
   });
 
   it("healthz responds", async () => {
@@ -291,12 +333,11 @@ describe("dashboard auth", () => {
 });
 
 describe("key issuance", () => {
-  it("creates a free API key", async () => {
+  it("retires free API key issuance", async () => {
     const res = await post("/v1/keys", { label: "test agent" });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(410);
     const body = (await res.json()) as any;
-    expect(body.key).toMatch(/^ul_[a-z0-9]{24}$/);
-    expect(body.plan).toBe("free");
+    expect(body.error.code).toBe("not_found");
   });
 });
 

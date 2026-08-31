@@ -1,0 +1,25 @@
+name: Machine contract status
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_BASE_URL: ${{ vars.SERVICE_URL || 'https://upgradelens.mattpicone.workers.dev' }}
+      BAZAAR_STATUS_URL: ${{ vars.BAZAAR_STATUS_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check public health, schemas, pricing, Registry, and payment mode
+        run: npm run operator:status -- --json --strict
