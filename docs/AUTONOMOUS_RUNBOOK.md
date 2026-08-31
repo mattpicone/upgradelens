@@ -62,6 +62,12 @@ rollout attestation (contract version, price, network, and recipient hash).
 `paused` serves no paid calls after the rolling free unit is consumed. Any
 missing prerequisite fails closed with a machine-readable error.
 
+The capital policy is strict: owner funds are never used. Testnet acceptance
+uses only free Base Sepolia faucet tokens. Mainnet facilitator or gas costs may
+be covered only by a capped reserve of already-earned merchant revenue; there
+are no cards, fiat top-ups, or owner-funded retries. If the earned reserve is
+not available, remain in validation/paused mode.
+
 Both `TRIAL_HMAC_SECRET` and `PAYMENT_RECOVERY_SECRET` must contain at least
 32 bytes. They must be independently generated values; neither is a wallet
 key, and neither should be reused as one.
