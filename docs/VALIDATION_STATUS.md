@@ -31,9 +31,13 @@ or failed.
 - The Worker uses a Worker-native CDP facilitator client; the live no-payment
   probe returns the exact Base Sepolia x402 v2 challenge without executing a
   business call or moving funds.
-- Next honest gate: run the credentialed `/mcp-testnet` acceptance and Bazaar
-  proof. Mainnet remains blocked until that proof and a recoverable recipient
-  are present.
+- Local release hardening is complete through commit `e551a6f` (isolated
+  testnet identities, exact receipt/replay checks, and strict Bazaar REST/MCP
+  acceptance). It is awaiting deployment because the local Cloudflare login
+  token expired; the live Worker remains on the preceding 0.3.1 build.
+- Next honest gate after deployment: run the credentialed `/mcp-testnet`
+  acceptance and Bazaar proof. Mainnet remains blocked until that proof and a
+  recoverable recipient are present.
 
 ## Live production
 
