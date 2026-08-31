@@ -387,6 +387,13 @@ if (ranked.length === 0) {
     };
     if (unsuitableChosen) throw new Error("selection policy matched a dependency tool to an unsuitable task");
     if (!chosen) throw new Error("selected service exposed no dependency-upgrade capability");
+    if (acceptance) {
+      const exposedNames = new Set(tools.map((tool) => tool.name));
+      const missing = acceptanceToolNames.filter((name) => !exposedNames.has(name));
+      if (missing.length > 0) {
+        throw new Error(`controlled acceptance service is missing business tools: ${missing.join(", ")}`);
+      }
+    }
     if (!process.argv.includes("--inspect-only")) {
       let revenueBefore = null;
       if (acceptance) {
