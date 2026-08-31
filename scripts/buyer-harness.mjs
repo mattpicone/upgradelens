@@ -20,6 +20,7 @@ const terms = [
   ...new Set(capabilityTerms.filter((term) => buyerTask.toLowerCase().includes(term))),
   null,
 ];
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 async function query(term) {
   const url = new URL(registryBase);
@@ -243,9 +244,6 @@ if (ranked.length === 0) {
           throw new Error("--acceptance is restricted to the controlled /mcp-testnet identity");
         }
         if (!process.env.BUYER_PRIVATE_KEY) throw new Error("--acceptance requires BUYER_PRIVATE_KEY");
-        if (!bazaarMcp.ok || capabilityScore(bazaarMcp.structured, buyerTask) === 0) {
-          throw new Error("brandless Bazaar MCP search did not return a matching dependency capability");
-        }
         revenueBefore = await dashboardRevenue(selectedUrl);
       }
       const call = (name, args) => buyer === client
@@ -318,6 +316,20 @@ if (ranked.length === 0) {
         };
         if (revenueAfter !== revenueBefore) {
           throw new Error("controlled testnet settlements changed eligible mainnet dashboard revenue");
+        }
+        // Bazaar learns a resource from the PaymentRequired extension, so the
+        // acceptance run must settle first and then allow a short indexing
+        // window before requiring brandless discovery.
+        const bazaarAttempts = Math.max(1, Math.min(12, Number(process.env.BAZAAR_ACCEPTANCE_ATTEMPTS || 6)));
+        let indexedBazaar = null;
+        for (let attempt = 0; attempt < bazaarAttempts; attempt += 1) {
+          if (attempt > 0) await sleep(5000);
+          indexedBazaar = await queryBazaarMcp();
+          if (indexedBazaar.ok && capabilityScore(indexedBazaar.structured, buyerTask) > 0) break;
+        }
+        report.bazaar_mcp = indexedBazaar;
+        if (!indexedBazaar?.ok || capabilityScore(indexedBazaar.structured, buyerTask) === 0) {
+          throw new Error("brandless Bazaar MCP search did not return a matching dependency capability after settlement");
         }
       }
     }
