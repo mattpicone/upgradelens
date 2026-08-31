@@ -730,6 +730,18 @@ describe("paid execution and settlement state machine", () => {
     expect(sqlite.prepare("SELECT eligible_mainnet FROM billing_ledger_v3").get().eligible_mainnet).toBe(0);
   });
 
+  it("reconciles an existing authorization while new paid calls are paused", async () => {
+    const { env, sqlite } = fixture();
+    const runtime = runtimeFixture({ settle: () => { throw new Error("initial timeout"); } });
+    const authorization = payload("payment-paused-reconcile-0001");
+    expect(errorCode(await executeAnalysis(paidInput(env, runtime.runtime, { paymentPayload: authorization })))).toBe("payment_pending");
+
+    env.PAYMENT_MODE = "paused";
+    runtime.setSettle(() => ({ success: true, transaction: `0x${"2".repeat(64)}`, network: NETWORK }));
+    expect(await reconcilePendingPayments(env, 8, runtime.runtime)).toBe(1);
+    expect(sqlite.prepare("SELECT settlement_state FROM payment_attempts").get().settlement_state).toBe("settled");
+  });
+
   it("reconciles a successful receipt after an atomic ledger-write failure without settling twice", async () => {
     const { env, d1, sqlite } = fixture();
     const runtime = runtimeFixture();
