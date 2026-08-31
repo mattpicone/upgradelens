@@ -12,15 +12,104 @@ import { appendPaymentIdentifierToExtensions } from "@x402/extensions/payment-id
 
 const registryBase = process.env.MCP_REGISTRY_URL || "https://registry.modelcontextprotocol.io/v0.1/servers";
 const timeout = Number(process.env.BUYER_TIMEOUT_MS || 8000);
-const bazaarRestUrl = process.env.BAZAAR_REST_URL;
+const acceptance = process.argv.includes("--acceptance");
+const bazaarRestUrl = process.env.BAZAAR_REST_URL ||
+  (acceptance ? "https://api.cdp.coinbase.com/platform/v2/x402/discovery/search" : null);
 const bazaarMcpUrl = process.env.BAZAAR_MCP_URL || "https://api.cdp.coinbase.com/platform/v2/x402/discovery/mcp";
 const buyerTask = process.env.BUYER_TASK || "Assess a dependency upgrade for package security and migration compatibility";
+const acceptanceServiceUrl = process.env.ACCEPTANCE_SERVICE_URL;
+const expectedPayTo = process.env.X402_PAY_TO?.toLowerCase();
+const acceptanceNetwork = "eip155:84532";
+const acceptanceAsset = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+const acceptanceAmount = "10000";
+const acceptanceToolNames = [
+  "check_dependency_upgrade",
+  "find_safe_upgrade_target",
+  "plan_dependency_upgrade",
+];
+const testnetRunId = acceptance ? crypto.randomUUID().replaceAll("-", "") : null;
 const capabilityTerms = ["dependency", "upgrade", "package", "security", "migration", "compatibility"];
 const terms = [
   ...new Set(capabilityTerms.filter((term) => buyerTask.toLowerCase().includes(term))),
   null,
 ];
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function normalizedEndpoint(value) {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname.replace(/\/+$/, "") || "/"}`;
+}
+
+function acceptancePaymentMatches({ toolName, paymentRequired }) {
+  const accepts = Array.isArray(paymentRequired?.accepts) ? paymentRequired.accepts : [];
+  const requirement = accepts[0];
+  return paymentRequired?.x402Version === 2 &&
+    paymentRequired?.resource?.url === `mcp://tool/${toolName}` &&
+    paymentRequired?.extensions?.["payment-identifier"]?.info?.required === true &&
+    accepts.length === 1 &&
+    requirement?.scheme === "exact" &&
+    requirement?.network === acceptanceNetwork &&
+    requirement?.amount === acceptanceAmount &&
+    String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
+    String(requirement?.payTo || "").toLowerCase() === expectedPayTo;
+}
+
+function matchingBazaarTools(structured) {
+  if (!expectedPayTo || !Array.isArray(structured?.tools)) return [];
+  const matched = new Set();
+  for (const tool of structured.tools) {
+    const required = tool?._meta?.["x402/payment-required"];
+    const toolName = required?.extensions?.bazaar?.info?.input?.toolName;
+    const requirement = Array.isArray(required?.accepts) ? required.accepts[0] : null;
+    if (
+      acceptanceToolNames.includes(toolName) &&
+      required?.resource?.serviceName === "UpgradeLens" &&
+      required?.resource?.url === `mcp://tool/${toolName}` &&
+      Array.isArray(required.accepts) && required.accepts.length === 1 &&
+      requirement?.scheme === "exact" &&
+      requirement?.network === acceptanceNetwork &&
+      requirement?.amount === acceptanceAmount &&
+      String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
+      String(requirement?.payTo || "").toLowerCase() === expectedPayTo &&
+      capabilityScore(required, buyerTask) > 0
+    ) matched.add(toolName);
+  }
+  return [...matched].sort();
+}
+
+function bazaarResources(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.resources)) return value.resources;
+  if (Array.isArray(value?.items)) return value.items;
+  return [];
+}
+
+function matchingBazaarRestTools(value) {
+  if (!expectedPayTo) return [];
+  const matched = new Set();
+  for (const resource of bazaarResources(value)) {
+    const info = resource?.extensions?.bazaar?.info?.input;
+    const toolName = info?.toolName || resource?.toolName;
+    const resourceUrl = typeof resource?.resource === "string"
+      ? resource.resource
+      : typeof resource?.url === "string" ? resource.url : resource?.resource?.url;
+    const requirement = Array.isArray(resource?.accepts) ? resource.accepts[0] : null;
+    if (
+      acceptanceToolNames.includes(toolName) &&
+      resource?.serviceName === "UpgradeLens" &&
+      resourceUrl === `mcp://tool/${toolName}` &&
+      resource?.x402Version === 2 &&
+      Array.isArray(resource.accepts) && resource.accepts.length === 1 &&
+      requirement?.scheme === "exact" &&
+      requirement?.network === acceptanceNetwork &&
+      requirement?.amount === acceptanceAmount &&
+      String(requirement?.asset || "").toLowerCase() === acceptanceAsset &&
+      String(requirement?.payTo || "").toLowerCase() === expectedPayTo &&
+      capabilityScore(resource, buyerTask) > 0
+    ) matched.add(toolName);
+  }
+  return [...matched].sort();
+}
 
 async function query(term) {
   const url = new URL(registryBase);
@@ -52,10 +141,12 @@ async function queryBazaarMcp() {
       name: "search_resources",
       arguments: { query: buyerTask, curatedOnly: false },
     });
+    const structured = structuredResult(result);
     return {
       ok: result.isError !== true,
       endpoint: bazaarMcpUrl,
-      structured: structuredResult(result),
+      structured,
+      matched_tools: matchingBazaarTools(structured),
     };
   } catch (error) {
     return {
@@ -65,6 +156,46 @@ async function queryBazaarMcp() {
     };
   } finally {
     await client.close().catch(() => {});
+  }
+}
+
+async function queryBazaarRest() {
+  if (!bazaarRestUrl) return { configured: false, ok: false, matched_tools: [] };
+  const url = new URL(bazaarRestUrl);
+  url.searchParams.set("query", buyerTask);
+  url.searchParams.set("network", acceptanceNetwork);
+  url.searchParams.set("scheme", "exact");
+  url.searchParams.set("limit", "20");
+  if (expectedPayTo) url.searchParams.set("payTo", expectedPayTo);
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(timeout),
+      headers: {
+        accept: "application/json",
+        ...(process.env.CDP_BEARER_TOKEN ? { authorization: `Bearer ${process.env.CDP_BEARER_TOKEN}` } : {}),
+      },
+    });
+    const body = response.ok ? await response.json() : null;
+    return {
+      configured: true,
+      ok: response.ok,
+      status: response.status,
+      endpoint: bazaarRestUrl,
+      matched_tools: matchingBazaarRestTools(body),
+      resources: bazaarResources(body).length,
+      results: body,
+      ...(response.ok ? {} : { error: typeof body === "object" ? body?.message || body?.error : `HTTP ${response.status}` }),
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      ok: false,
+      endpoint: bazaarRestUrl,
+      matched_tools: [],
+      resources: 0,
+      results: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -147,24 +278,7 @@ const ranked = [...all.values()]
   .filter((candidate) => candidate.endpoint && candidate.score > 0)
   .sort((a, b) => b.score - a.score);
 
-let bazaar = { configured: false, results: [] };
-if (bazaarRestUrl) {
-  const url = new URL(bazaarRestUrl);
-  url.searchParams.set("query", "dependency upgrade");
-  url.searchParams.set("curatedOnly", "false");
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(timeout),
-      headers: {
-        accept: "application/json",
-        ...(process.env.CDP_BEARER_TOKEN ? { authorization: `Bearer ${process.env.CDP_BEARER_TOKEN}` } : {}),
-      },
-    });
-    bazaar = { configured: true, status: response.status, results: response.ok ? await response.json() : [] };
-  } catch (error) {
-    bazaar = { configured: true, results: [], error: error instanceof Error ? error.message : String(error) };
-  }
-}
+const bazaarRest = await queryBazaarRest();
 const bazaarMcp = await queryBazaarMcp();
 
 if (ranked.length === 0) {
@@ -172,9 +286,34 @@ if (ranked.length === 0) {
   process.exitCode = 2;
 } else {
   const selected = ranked[0];
+  if (process.env.BUYER_PRIVATE_KEY && !acceptance) {
+    throw new Error("BUYER_PRIVATE_KEY is restricted to the controlled --acceptance flow");
+  }
+  let selectedUrl = new URL(selected.endpoint);
+  if (acceptance) {
+    if (!acceptanceServiceUrl) throw new Error("--acceptance requires ACCEPTANCE_SERVICE_URL");
+    if (!process.env.MCP_TESTNET_TOKEN || !process.env.OWNER_TOKEN || !process.env.BUYER_PRIVATE_KEY) {
+      throw new Error("--acceptance requires MCP_TESTNET_TOKEN, OWNER_TOKEN, and BUYER_PRIVATE_KEY");
+    }
+    if (!expectedPayTo || !/^0x[0-9a-f]{40}$/.test(expectedPayTo)) {
+      throw new Error("--acceptance requires a valid X402_PAY_TO payment guard");
+    }
+    const trusted = new URL(acceptanceServiceUrl);
+    if (trusted.protocol !== "https:" || normalizedEndpoint(selectedUrl) !== normalizedEndpoint(trusted)) {
+      throw new Error("public discovery did not select the explicitly trusted acceptance service");
+    }
+    if (process.env.MCP_PATH !== "/mcp-testnet") {
+      throw new Error("--acceptance is restricted to MCP_PATH=/mcp-testnet");
+    }
+    // Use the trusted URL after comparing it to the independently discovered
+    // Registry result. No secret is ever sent to the untrusted candidate URL.
+    selectedUrl = trusted;
+  }
+  if (process.env.MCP_PATH) selectedUrl.pathname = process.env.MCP_PATH;
   const client = new Client({ name: "unseeded-buyer-harness", version: "0.3.1" }, { capabilities: {} });
   let buyer = client;
   let paymentPayload = null;
+  const paymentChallenges = [];
   if (process.env.BUYER_PRIVATE_KEY) {
     // The key is read only from the caller's environment and is never logged
     // or persisted. Without it the harness still proves discovery, schema
@@ -187,8 +326,7 @@ if (ranked.length === 0) {
     ]);
     const account = privateKeyToAccount(process.env.BUYER_PRIVATE_KEY);
     const paymentClient = new x402Client()
-      .register("eip155:84532", new ExactEvmScheme(account))
-      .register("eip155:8453", new ExactEvmScheme(account))
+      .register(acceptanceNetwork, new ExactEvmScheme(account))
       .registerExtension({
         key: "payment-identifier",
         enrichPaymentPayload: async (created) => ({
@@ -198,18 +336,35 @@ if (ranked.length === 0) {
       });
     buyer = new x402MCPClient(client, paymentClient, {
       autoPayment: true,
-      onPaymentRequested: async () => true,
+      onPaymentRequested: async (context) => {
+        const accepted = acceptancePaymentMatches(context);
+        if (acceptance && accepted) {
+          const requirement = context.paymentRequired.accepts[0];
+          paymentChallenges.push({
+            tool: context.toolName,
+            resource: context.paymentRequired.resource?.url || null,
+            network: requirement?.network || null,
+            asset: requirement?.asset || null,
+            amount: requirement?.amount || null,
+            payTo: requirement?.payTo || null,
+            payment_identifier_required:
+              context.paymentRequired.extensions?.["payment-identifier"]?.info?.required === true,
+          });
+        }
+        return accepted;
+      },
     });
     buyer.onAfterPayment(async (context) => {
       paymentPayload = context.paymentPayload;
     });
   }
-  const selectedUrl = new URL(selected.endpoint);
-  if (process.env.MCP_PATH) selectedUrl.pathname = process.env.MCP_PATH;
   const transport = new StreamableHTTPClientTransport(selectedUrl, {
     requestInit: {
-      headers: process.env.MCP_TESTNET_TOKEN && selectedUrl.pathname === "/mcp-testnet"
-        ? { authorization: `Bearer ${process.env.MCP_TESTNET_TOKEN}` }
+      headers: acceptance && selectedUrl.pathname === "/mcp-testnet"
+        ? {
+            authorization: `Bearer ${process.env.MCP_TESTNET_TOKEN}`,
+            "x-upgradelens-testnet-run": testnetRunId,
+          }
         : {},
     },
   });
@@ -225,7 +380,8 @@ if (ranked.length === 0) {
     const unsuitableChosen = tools.some((tool) => capabilityScore(tool, unsuitableTask) > 0);
     const report = {
       discovery: { candidates: ranked.length, selected: selected.server?.name || null, score: selected.score },
-      bazaar,
+      bazaar: { configured: bazaarRest.configured, status: bazaarRest.status, results: bazaarRest.results ?? [], ...(bazaarRest.error ? { error: bazaarRest.error } : {}) },
+      bazaar_rest: bazaarRest,
       bazaar_mcp: bazaarMcp,
       initialize: { server: client.getServerVersion() || null },
       pricing: selected.server?.pricing || selected.server?.metadata?.pricing || null,
@@ -233,11 +389,11 @@ if (ranked.length === 0) {
       tools: tools.map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })),
       selected_tool: chosen?.name || null,
       unsuitable_task_rejected: !unsuitableChosen,
+      acceptance_endpoint: acceptance ? selectedUrl.toString() : null,
     };
     if (unsuitableChosen) throw new Error("selection policy matched a dependency tool to an unsuitable task");
     if (!chosen) throw new Error("selected service exposed no dependency-upgrade capability");
     if (!process.argv.includes("--inspect-only")) {
-      const acceptance = process.argv.includes("--acceptance");
       let revenueBefore = null;
       if (acceptance) {
         if (selectedUrl.pathname !== "/mcp-testnet") {
@@ -273,6 +429,15 @@ if (ranked.length === 0) {
         if (retryStructured?.billing?.payment_status !== "cached_settlement") {
           throw new Error("idempotent authorization retry did not return the cached settlement result");
         }
+        const replayPayload = structuredClone(paymentPayload);
+        replayPayload.extensions["payment-identifier"].info.id =
+          `replay_${crypto.randomUUID().replaceAll("-", "")}`;
+        const replay = await buyer.callToolWithPayment(chosen.name, paidArgs, replayPayload);
+        const replayStructured = structuredResult(replay);
+        const replayCode = replayStructured?.error?.code || null;
+        if (replayCode !== "payment_replay") {
+          throw new Error(`replayed authorization was not rejected as payment_replay (got ${String(replayCode)})`);
+        }
         report.paid_call = {
           isError: paid.isError === true,
           payment_made: true,
@@ -284,6 +449,12 @@ if (ranked.length === 0) {
           payment_status: retryStructured.billing.payment_status,
           same_transaction: retry.paymentResponse?.transaction === paid.paymentResponse?.transaction,
         };
+        report.replay_rejection = {
+          isError: replay.isError === true,
+          code: replayCode,
+          handler_not_reexecuted: true,
+        };
+        report.payment_challenges = paymentChallenges;
         report.per_tool_testnet = [{
           tool: chosen.name,
           transaction: paid.paymentResponse?.transaction || null,
@@ -325,11 +496,16 @@ if (ranked.length === 0) {
         for (let attempt = 0; attempt < bazaarAttempts; attempt += 1) {
           if (attempt > 0) await sleep(5000);
           indexedBazaar = await queryBazaarMcp();
-          if (indexedBazaar.ok && capabilityScore(indexedBazaar.structured, buyerTask) > 0) break;
+          if (indexedBazaar.ok && indexedBazaar.matched_tools?.length === acceptanceToolNames.length) break;
         }
         report.bazaar_mcp = indexedBazaar;
-        if (!indexedBazaar?.ok || capabilityScore(indexedBazaar.structured, buyerTask) === 0) {
-          throw new Error("brandless Bazaar MCP search did not return a matching dependency capability after settlement");
+        if (!indexedBazaar?.ok || indexedBazaar.matched_tools?.length !== acceptanceToolNames.length) {
+          throw new Error("brandless Bazaar MCP search did not return all three exact UpgradeLens tools after settlement");
+        }
+        const indexedBazaarRest = await queryBazaarRest();
+        report.bazaar_rest = indexedBazaarRest;
+        if (!indexedBazaarRest?.ok || indexedBazaarRest.matched_tools?.length !== acceptanceToolNames.length) {
+          throw new Error("brandless Bazaar REST search did not return all three exact UpgradeLens tools after settlement");
         }
       }
     }

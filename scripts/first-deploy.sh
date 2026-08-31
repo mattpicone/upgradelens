@@ -21,26 +21,32 @@ echo "    database_id: $DB_ID"
 echo "==> Writing database_id into wrangler.toml"
 perl -pi -e "s/^database_id = .*/database_id = \"$DB_ID\"/" wrangler.toml
 
-echo "==> Applying schema"
-npx wrangler d1 execute upgradelens --remote --file=./migrations/0001_init.sql -y
-npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql -y
-npx wrangler d1 execute upgradelens --remote --file=./migrations/0005_dashboard_reset.sql -y
+echo "==> Applying schema and additive migrations"
+# Keep this list explicit and ordered: 0004 starts the measurement clock only
+# after the worker is healthy, while 0005 establishes the non-destructive
+# dashboard baseline and 0006 creates the machine-payment ledger.
+for migration in \
+  migrations/0001_init.sql \
+  migrations/0002_hardening.sql \
+  migrations/0003_mcp_funnel.sql \
+  migrations/0005_dashboard_reset.sql \
+  migrations/0006_machine_payments.sql
+do
+  npx wrangler d1 execute upgradelens --remote --file="./$migration" -y
+done
 
 echo "==> Setting worker secrets"
-OWNER_TOKEN="ulo_$(openssl rand -hex 24)"
-ADMIN_KEY_FILE=".admin_key_local"
-if [ -f "$ADMIN_KEY_FILE" ]; then ADMIN_KEY=$(cat "$ADMIN_KEY_FILE"); else ADMIN_KEY="ulk_admin_$(openssl rand -hex 24)"; echo "$ADMIN_KEY" > "$ADMIN_KEY_FILE"; fi
+OWNER_TOKEN="${OWNER_TOKEN:-ulo_$(openssl rand -hex 24)}"
+ADMIN_KEY="${ADMIN_KEY:-ulk_admin_$(openssl rand -hex 24)}"
 echo "$OWNER_TOKEN" | npx wrangler secret put OWNER_TOKEN
 echo "$ADMIN_KEY" | npx wrangler secret put ADMIN_KEY
-echo "$OWNER_TOKEN" > .owner_token_local && chmod 600 .owner_token_local
-echo "    OWNER_TOKEN saved to .owner_token_local (git-ignored)"
+echo "    owner/admin values were held in memory only; retrieve them from the configured secret manager"
 
 echo "==> Resolving workers.dev subdomain"
 SUBDOMAIN=$(npx wrangler whoami 2>/dev/null | grep -oE '[a-z0-9-]+@' | head -1 || true)
 
 echo "==> Deploying"
 npx wrangler deploy
-npx wrangler d1 execute upgradelens --remote --file=./migrations/0003_mcp_funnel.sql -y
 
 echo "==> Determining public URL"
 URL=$(npx wrangler deployments list 2>/dev/null | grep -oE 'https://[a-z0-9.-]+workers\.dev' | head -1 || true)

@@ -121,7 +121,7 @@ function runtimeFixture(options = {}) {
   const runtimeAsset = mode === "mainnet" ? BASE_USDC : BASE_SEPOLIA_USDC;
   const state = { builds: 0, verifies: 0, settles: 0 };
   let verifyImpl = options.verify ?? (() => ({ isValid: true }));
-  let settleImpl = options.settle ?? (() => ({ success: true, transaction: "0xtestnet-transaction", network: runtimeNetwork }));
+  let settleImpl = options.settle ?? (() => ({ success: true, transaction: `0x${"a".repeat(64)}`, network: runtimeNetwork }));
   const server = {
     async buildPaymentRequirements({ price }) {
       state.builds += 1;
@@ -370,6 +370,7 @@ describe("paid authorization validation", () => {
       new Date().toISOString(),
     );
     const evidence = {
+      acceptance_endpoint: "https://upgradelens.test/mcp-testnet",
       git_sha: "release-sha",
       lockfile_hash: "lock-hash",
       suite_hash: "suite-hash",
@@ -382,8 +383,17 @@ describe("paid authorization validation", () => {
         { tool: "plan_dependency_upgrade", transaction: `0x${"3".repeat(64)}` },
       ],
       idempotent_retry: true,
+      replay_rejected: true,
+      payment_challenges: [
+        { tool: "check_dependency_upgrade", resource: "mcp://tool/check_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+        { tool: "find_safe_upgrade_target", resource: "mcp://tool/find_safe_upgrade_target", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+        { tool: "plan_dependency_upgrade", resource: "mcp://tool/plan_dependency_upgrade", network: NETWORK, asset: BASE_SEPOLIA_USDC, amount: "10000", payTo: RECIPIENT, payment_identifier_required: true },
+      ],
       unsuitable_task_rejected: true,
       bazaar_mcp_discovered: true,
+      bazaar_mcp_tools: ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"],
+      bazaar_rest_discovered: true,
+      bazaar_rest_tools: ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"],
       dashboard_revenue_unchanged: true,
     };
     sqlite.prepare(
@@ -541,7 +551,7 @@ describe("paid execution and settlement state machine", () => {
   it("withholds a success receipt that is missing a transaction or names the wrong network", async () => {
     const { env, sqlite } = fixture();
     const runtime = runtimeFixture({
-      settle: () => ({ success: true, transaction: "0xwrong-network", network: "eip155:8453" }),
+      settle: () => ({ success: true, transaction: `0x${"b".repeat(64)}`, network: "eip155:8453" }),
     });
     const outcome = await executeAnalysis(paidInput(env, runtime.runtime, {
       paymentPayload: payload("payment-receipt-network-0001"),
@@ -554,6 +564,23 @@ describe("paid execution and settlement state machine", () => {
     });
     expect(sqlite.prepare("SELECT COUNT(*) AS count FROM billing_ledger_v3").get().count).toBe(0);
     expect(sqlite.prepare("SELECT delivery_state FROM business_calls").get().delivery_state).toBe("withheld");
+  });
+
+  it("withholds a success receipt whose settled amount differs from the authorization", async () => {
+    const { env, sqlite } = fixture();
+    const runtime = runtimeFixture({
+      settle: () => ({ success: true, transaction: `0x${"1".repeat(64)}`, network: NETWORK, amount: "10001" }),
+    });
+    const outcome = await executeAnalysis(paidInput(env, runtime.runtime, {
+      paymentPayload: payload("payment-receipt-amount-0001"),
+    }));
+
+    expect(errorCode(outcome)).toBe("payment_pending");
+    expect(sqlite.prepare("SELECT settlement_state, failure_code FROM payment_attempts").get()).toMatchObject({
+      settlement_state: "pending",
+      failure_code: "invalid_settlement_receipt",
+    });
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM billing_ledger_v3").get().count).toBe(0);
   });
 
   it("allows only one executor through a concurrent retry race", async () => {
@@ -619,7 +646,7 @@ describe("paid execution and settlement state machine", () => {
     expect(attempt.recovery_payload).not.toContain("payment-reconcile-0001");
     expect(call).toMatchObject({ execution_state: "result_saved", delivery_state: "withheld" });
 
-    runtime.setSettle(() => ({ success: true, transaction: "0xreconciled", network: NETWORK }));
+    runtime.setSettle(() => ({ success: true, transaction: `0x${"c".repeat(64)}`, network: NETWORK }));
     expect(await reconcilePendingPayments(env, 8, runtime.runtime)).toBe(1);
     attempt = sqlite.prepare("SELECT settlement_state, recovery_payload FROM payment_attempts").get();
     call = sqlite.prepare("SELECT execution_state, delivery_state FROM business_calls").get();
@@ -640,7 +667,7 @@ describe("paid execution and settlement state machine", () => {
       "UPDATE payment_attempts SET settlement_state='executing', updated_at='2000-01-01T00:00:00.000Z'",
     ).run();
 
-    runtime.setSettle(() => ({ success: true, transaction: "0xafter-crash", network: NETWORK }));
+    runtime.setSettle(() => ({ success: true, transaction: `0x${"d".repeat(64)}`, network: NETWORK }));
     expect(await reconcilePendingPayments(env, 8, runtime.runtime)).toBe(1);
     expect(sqlite.prepare("SELECT settlement_state FROM payment_attempts").get().settlement_state).toBe("settled");
     expect(sqlite.prepare("SELECT delivery_state FROM business_calls").get().delivery_state).toBe("delivered");
@@ -674,7 +701,7 @@ describe("paid execution and settlement state machine", () => {
     runtime.setSettle(async () => {
       enterSettlement();
       await release;
-      return { success: true, transaction: "0xleased", network: NETWORK };
+      return { success: true, transaction: `0x${"e".repeat(64)}`, network: NETWORK };
     });
 
     const firstCron = reconcilePendingPayments(env, 8, runtime.runtime);
@@ -697,7 +724,7 @@ describe("paid execution and settlement state machine", () => {
       PAYMENT_MODE: "mainnet",
       KNOWN_UNIT_COST_MICROS: "9000",
     });
-    runtime.setSettle(() => ({ success: true, transaction: "0xmargin-reconciled", network: NETWORK }));
+    runtime.setSettle(() => ({ success: true, transaction: `0x${"f".repeat(64)}`, network: NETWORK }));
     expect(await reconcilePendingPayments(env, 8, runtime.runtime)).toBe(1);
     expect(sqlite.prepare("SELECT settlement_state FROM payment_attempts").get().settlement_state).toBe("settled");
     expect(sqlite.prepare("SELECT eligible_mainnet FROM billing_ledger_v3").get().eligible_mainnet).toBe(0);

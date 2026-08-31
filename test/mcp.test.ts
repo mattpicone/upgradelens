@@ -294,6 +294,29 @@ describe("MCP protocol", () => {
     expect((await res.json() as any).error.code).toBe("not_found");
   });
 
+  it("rejects malformed controlled testnet run identities before MCP handling", async () => {
+    const testnetEnv = fakeEnv({
+      MCP_TESTNET_TOKEN: "testnet-token",
+      TRIAL_HMAC_SECRET: "test-secret-that-is-at-least-32-bytes-long",
+    });
+    const res = await app.request(
+      "/mcp-testnet",
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer testnet-token",
+          "content-type": "application/json",
+          "x-upgradelens-testnet-run": "too-short",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 40, method: "tools/list" }),
+      },
+      testnetEnv,
+      fakeCtx,
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json() as any).error.code).toBe("invalid_input");
+  });
+
   it("keeps the challenge-only probe from entering the validation handler", async () => {
     const res = await app.request(
       "/mcp",

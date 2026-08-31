@@ -18,6 +18,7 @@ import {
   classifyMcpEvent,
   classifyMcpActor,
   classifyMcpSource,
+  hashIdentity,
   cleanupRateCounters,
   cleanupUsageEvents,
 } from "./telemetry";
@@ -231,6 +232,28 @@ app.all("/mcp-testnet", async (c) => {
   const token = c.req.header("authorization")?.replace(/^Bearer\s+/i, "").trim();
   if (!c.env.MCP_TESTNET_TOKEN || token !== c.env.MCP_TESTNET_TOKEN) {
     return c.json(machineError("not_found", "The controlled testnet endpoint is not enabled.", false), 404);
+  }
+  // Acceptance runs receive a fresh, unguessable identity so a previous
+  // probe or run from the same egress address cannot consume their one free
+  // evaluation. The run id is deliberately scoped to the controlled endpoint
+  // and is never treated as an API key or retained in plaintext telemetry.
+  const runId = c.req.header("x-upgradelens-testnet-run");
+  if (runId !== undefined) {
+    if (!/^[A-Za-z0-9_-]{16,128}$/.test(runId)) {
+      return c.json(machineError("invalid_input", "The controlled testnet run identifier is malformed.", false), 400);
+    }
+    const digest = await hashIdentity(`testnet-run:${token}:${runId}`);
+    const current = c.get("caller");
+    c.set("caller", {
+      ...current,
+      clientKey: `testnet:${digest}`,
+      internal: false,
+      keyed: false,
+      plan: "testnet",
+      dailyQuota: 100,
+      authState: "none",
+      trialSubject: digest,
+    });
   }
   return handleMcp(c, { PAYMENT_MODE: "testnet" });
 });

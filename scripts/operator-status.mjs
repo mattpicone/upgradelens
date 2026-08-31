@@ -56,11 +56,22 @@ const registryText = JSON.stringify(registry.body || {}).toLowerCase();
 const registryIndexed = registry.ok &&
   registryText.includes("io.github.mattpicone/upgradelens") &&
   /\"version\"\s*:\s*\"0\.3\.1\"/.test(registryText);
+const bazaarStates = new Set([
+  "absent",
+  "testnet_indexed",
+  "production_awaiting_first_settlement",
+  "production_indexed",
+  "curated",
+]);
 const bazaar = process.env.BAZAAR_STATUS_URL
   ? await fetchJson(process.env.BAZAAR_STATUS_URL)
   : process.env.BAZAAR_STATE
-    ? { ok: true, status: 200, body: { state: process.env.BAZAAR_STATE } }
+    ? bazaarStates.has(process.env.BAZAAR_STATE)
+      ? { ok: true, status: 200, body: { state: process.env.BAZAAR_STATE } }
+      : { ok: false, status: 200, body: { state: process.env.BAZAAR_STATE }, error: "unrecognized Bazaar state" }
     : { ok: false, status: 0, error: "BAZAAR_STATUS_URL/BAZAAR_STATE not configured" };
+const bazaarState = bazaar.body?.state;
+const bazaarStateValid = bazaarState === undefined || bazaarStates.has(bazaarState);
 
 const activation = pricing.body?.payment_activation || null;
 const checks = {
@@ -70,7 +81,7 @@ const checks = {
   openapi: { ok: openapi.ok && openapi.body?.info?.version === "0.3.1", detail: openapi.status },
   pricing: { ok: pricing.ok && pricing.body?.version === "0.3.1" && pricing.body?.unit?.price_usd === 0.01 && pricing.body?.unit?.atomic_usdc === "10000", detail: pricing.status },
   registry: { ok: registryIndexed, detail: registryIndexed ? "indexed" : registry.error || registry.status },
-  bazaar: { ok: bazaar.ok, detail: bazaar.ok ? "reachable" : bazaar.error || bazaar.status },
+  bazaar: { ok: bazaar.ok && bazaarStateValid, detail: bazaarState || (bazaar.ok ? "reachable" : bazaar.error || bazaar.status) },
   payment_activation: { ok: activation?.ready === true || activation?.mode === "validation", detail: activation },
 };
 const next = !checks.contract_version.ok ? "align immutable 0.3.1 manifests"

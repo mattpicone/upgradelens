@@ -22,6 +22,7 @@ export async function findSafeTarget(
   const now = new Date().toISOString();
   const evidence: Evidence[] = [];
   const base: FindTargetResult = {
+    action_allowed: false,
     ecosystem,
     package: pkg,
     current_version: currentVersion,

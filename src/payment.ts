@@ -12,6 +12,7 @@ import {
 import {
   ANALYSIS_UNIT_PRICE_MICROS,
   BASE_MAINNET,
+  BASE_SEPOLIA,
   BASE_USDC,
   BASE_SEPOLIA_USDC,
   CONTRACT_VERSION,
@@ -39,11 +40,25 @@ interface RolloutAcceptanceEvidence {
   suite_hash?: string;
   recipient_hash?: string;
   network?: string;
+  acceptance_endpoint?: string;
   free_payment_status?: string;
   tools?: Array<{ tool?: string; transaction?: string }>;
   idempotent_retry?: boolean;
+  replay_rejected?: boolean;
+  payment_challenges?: Array<{
+    tool?: string;
+    resource?: string;
+    network?: string;
+    asset?: string;
+    amount?: string;
+    payTo?: string;
+    payment_identifier_required?: boolean;
+  }>;
   unsuitable_task_rejected?: boolean;
   bazaar_mcp_discovered?: boolean;
+  bazaar_mcp_tools?: string[];
+  bazaar_rest_discovered?: boolean;
+  bazaar_rest_tools?: string[];
   dashboard_revenue_unchanged?: boolean;
 }
 
@@ -265,11 +280,13 @@ function resultFields(
     billing: _storedBilling,
     next_action: _storedNextAction,
     recommended_target: _storedTarget,
+    action_allowed: _storedActionAllowed,
     ...payload
   } = raw;
   return {
     next_action: nextAction,
     ...(target !== undefined ? { recommended_target: target } : {}),
+    action_allowed: operation === "find_safe_upgrade_target" ? false : raw.action_allowed === true,
     billing,
     ...payload,
   };
@@ -555,6 +572,28 @@ async function assertMainnetAttested(env: Env): Promise<void> {
   const expectedTools = OPERATION_CATALOG.map((operation) => operation.name).sort();
   const acceptedTools = acceptance?.tools?.map((entry) => entry.tool).sort() ?? [];
   const acceptanceTransactions = acceptance?.tools?.map((entry) => entry.transaction) ?? [];
+  const expectedAcceptanceEndpoint = `${env.PUBLIC_BASE_URL.replace(/\/+$/, "")}/mcp-testnet`;
+  const expectedNetwork = networkForMode("testnet");
+  const expectedAsset = BASE_SEPOLIA_USDC.toLowerCase();
+  const expectedAmount = String(ANALYSIS_UNIT_PRICE_MICROS);
+  const acceptanceChallenges = acceptance?.payment_challenges ?? [];
+  const challengeTools = acceptanceChallenges.map((entry) => entry.tool).sort();
+  const challengesValid = acceptanceChallenges.length === expectedTools.length &&
+    new Set(challengeTools).size === expectedTools.length &&
+    JSON.stringify(challengeTools) === JSON.stringify(expectedTools) &&
+    acceptanceChallenges.every((entry) =>
+      entry.tool &&
+      entry.resource === `mcp://tool/${entry.tool}` &&
+      entry.network === expectedNetwork &&
+      entry.amount === expectedAmount &&
+      entry.asset?.toLowerCase() === expectedAsset &&
+      entry.payTo?.toLowerCase() === (env.X402_PAY_TO ?? "").toLowerCase() &&
+      entry.payment_identifier_required === true,
+    );
+  const acceptanceBazaarMcpTools = acceptance?.bazaar_mcp_discovered === true &&
+    JSON.stringify([...(acceptance?.bazaar_mcp_tools ?? [])].sort()) === JSON.stringify(expectedTools);
+  const acceptanceBazaarRestTools = acceptance?.bazaar_rest_discovered === true &&
+    JSON.stringify([...(acceptance?.bazaar_rest_tools ?? [])].sort()) === JSON.stringify(expectedTools);
   const acceptanceValid =
     acceptanceRow?.state === "passed" &&
     acceptance?.git_sha === env.RELEASE_GIT_SHA &&
@@ -562,10 +601,14 @@ async function assertMainnetAttested(env: Env): Promise<void> {
     acceptance?.suite_hash === env.RELEASE_SUITE_HASH &&
     acceptance?.recipient_hash === recipientHash &&
     acceptance?.network === networkForMode("testnet") &&
+    acceptance?.acceptance_endpoint === expectedAcceptanceEndpoint &&
     acceptance?.free_payment_status === "trial" &&
     acceptance?.idempotent_retry === true &&
+    acceptance?.replay_rejected === true &&
+    challengesValid &&
     acceptance?.unsuitable_task_rejected === true &&
-    acceptance?.bazaar_mcp_discovered === true &&
+    acceptanceBazaarMcpTools &&
+    acceptanceBazaarRestTools &&
     acceptance?.dashboard_revenue_unchanged === true &&
     JSON.stringify(acceptedTools) === JSON.stringify(expectedTools) &&
     acceptanceTransactions.length === expectedTools.length &&
@@ -693,9 +736,18 @@ async function cachedSettlementOutcome<T extends object>(
 }
 
 function settlementTransaction(settlement: SettleResponse): string | null {
-  return typeof settlement.transaction === "string" && settlement.transaction.trim().length > 0
+  return typeof settlement.transaction === "string" && /^0x[0-9a-fA-F]{64}$/.test(settlement.transaction.trim())
     ? settlement.transaction
     : null;
+}
+
+function settlementMatchesRequirements(
+  settlement: SettleResponse,
+  network: string,
+  amount: string,
+): boolean {
+  return settlement.network === network &&
+    (settlement.amount === undefined || settlement.amount === amount);
 }
 
 async function duplicateTransactionOwner(
@@ -1043,7 +1095,7 @@ async function executePaid<T extends object>(
   }
 
   const transaction = settlementTransaction(settlement);
-  if (!transaction || settlement.network !== requirements.network) {
+  if (!transaction || !settlementMatchesRequirements(settlement, requirements.network, requirements.amount)) {
     await input.env.DB.prepare(
       `UPDATE payment_attempts SET settlement_state='pending', failure_code='invalid_settlement_receipt',
        receipt_json=NULL, updated_at=? WHERE payment_identifier=?`,
@@ -1237,9 +1289,12 @@ export async function reconcilePendingPayments(
   runtimeOverride?: PaymentRuntimeAdapter,
 ): Promise<number> {
   const mode = paymentMode(env);
-  if (mode !== "testnet" && mode !== "mainnet") return 0;
+  // Pausing new paid calls must not strand authorizations that already reached
+  // the durable pending state. Reconciliation below selects the facilitator
+  // network from each immutable payment row, so it is safe to continue while
+  // the public gate is paused.
+  if (mode !== "testnet" && mode !== "mainnet" && mode !== "paused") return 0;
   if (paymentInfrastructureBlockers(env).length > 0 || !env.PAYMENT_RECOVERY_SECRET) return 0;
-  const runtime = await (runtimeOverride ?? paymentRuntime(env, true));
   // A worker crash can leave a verified attempt in `executing` before its
   // handler result is durable. Never settle an authorization without that
   // result; expire the orphan instead so a buyer can retry with a new
@@ -1306,6 +1361,15 @@ export async function reconcilePendingPayments(
   let completed = 0;
   for (const row of rows.results ?? []) {
     try {
+      const rowMode = row.network === BASE_MAINNET
+        ? "mainnet"
+        : row.network === BASE_SEPOLIA
+          ? "testnet"
+          : null;
+      if (!rowMode) continue;
+      const runtime = runtimeOverride && runtimeOverride.network === row.network
+        ? runtimeOverride
+        : await paymentRuntime({ ...env, PAYMENT_MODE: rowMode }, true);
       const claimedAt = new Date().toISOString();
       const claim = await env.DB.prepare(
         `UPDATE payment_attempts SET settlement_state='settling', updated_at=?
@@ -1350,7 +1414,7 @@ export async function reconcilePendingPayments(
         continue;
       }
       const transaction = settlementTransaction(settlement);
-      if (!transaction || settlement.network !== row.network) {
+      if (!transaction || !settlementMatchesRequirements(settlement, row.network, row.amount_atomic)) {
         await env.DB.prepare(
           `UPDATE payment_attempts SET settlement_state='pending',
            failure_code='invalid_settlement_receipt', receipt_json=NULL, updated_at=?

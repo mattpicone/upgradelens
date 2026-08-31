@@ -25,16 +25,24 @@ settles, or invokes a business handler.
 The controlled release proof is generated without mainnet activity:
 
 ```sh
-MCP_PATH=/mcp-testnet npm run --silent buyer:harness -- --acceptance > /tmp/upgradelens-testnet-acceptance.json
-TESTNET_ACCEPTANCE_FILE=/tmp/upgradelens-testnet-acceptance.json npm run rollout:attest -- --sql
+MCP_PATH=/mcp-testnet \
+ACCEPTANCE_SERVICE_URL=https://upgradelens.mattpicone.workers.dev/mcp \
+BAZAAR_REST_URL=https://api.cdp.coinbase.com/platform/v2/x402/discovery/search \
+X402_PAY_TO=<configured-recipient> \
+npm run --silent buyer:harness -- --acceptance > /tmp/upgradelens-testnet-acceptance.json
+TESTNET_ACCEPTANCE_FILE=/tmp/upgradelens-testnet-acceptance.json \
+ACCEPTANCE_SERVICE_URL=https://upgradelens.mattpicone.workers.dev/mcp \
+X402_PAY_TO=<configured-recipient> \
+npm run rollout:attest -- --sql
 ```
 
 The first command additionally requires `MCP_TESTNET_TOKEN`,
 `BUYER_PRIVATE_KEY`, and `OWNER_TOKEN` in the environment. The second requires
 the matching `X402_PAY_TO`. It refuses reports that do not prove a trial result,
 one unique Sepolia settlement for each of the three discovered tools, a cached
-authorization retry, brandless Bazaar MCP discovery, unsuitable-task rejection,
-and unchanged eligible-mainnet dashboard revenue. The emitted SQL stores a
+authorization retry, replay rejection, exact payment terms, brandless Bazaar
+REST and MCP discovery, unsuitable-task rejection, and unchanged eligible-mainnet
+dashboard revenue. The emitted SQL stores a
 sanitized proof alongside the rollout attestation; mainnet refuses to activate
 without both matching records.
 

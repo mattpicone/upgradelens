@@ -29,12 +29,25 @@ const suiteManifest = (await Promise.all(
 )).join("\n---\n");
 const acceptanceFile = process.env.TESTNET_ACCEPTANCE_FILE;
 const recipient = process.env.X402_PAY_TO?.toLowerCase();
-if (!acceptanceFile || !recipient) {
-  console.error("TESTNET_ACCEPTANCE_FILE and X402_PAY_TO are required; no attestation was generated.");
+const acceptanceServiceUrl = process.env.ACCEPTANCE_SERVICE_URL;
+if (!acceptanceFile || !recipient || !acceptanceServiceUrl) {
+  console.error("TESTNET_ACCEPTANCE_FILE, ACCEPTANCE_SERVICE_URL, and X402_PAY_TO are required; no attestation was generated.");
   process.exit(2);
 }
 if (!/^0x[0-9a-f]{40}$/.test(recipient)) {
   console.error("X402_PAY_TO must be a valid EVM address; no attestation was generated.");
+  process.exit(2);
+}
+let expectedAcceptanceEndpoint;
+try {
+  const parsed = new URL(acceptanceServiceUrl);
+  if (parsed.protocol !== "https:") throw new Error("acceptance URL must use HTTPS");
+  parsed.pathname = "/mcp-testnet";
+  parsed.search = "";
+  parsed.hash = "";
+  expectedAcceptanceEndpoint = `${parsed.origin}${parsed.pathname}`;
+} catch (error) {
+  console.error(`ACCEPTANCE_SERVICE_URL must be a valid HTTPS URL: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(2);
 }
 let acceptance;
@@ -48,14 +61,43 @@ const toolSettlements = Array.isArray(acceptance.per_tool_testnet) ? acceptance.
 const transactions = toolSettlements.map((entry) => entry?.transaction);
 const expectedTools = ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"];
 const acceptedTools = toolSettlements.map((entry) => entry?.tool).sort();
+const expectedNetwork = "eip155:84532";
+const expectedAsset = "0x036cbd53842c5426634e7929541ec2318f3dcf7e";
+const expectedAmount = "10000";
+const paymentChallenges = Array.isArray(acceptance.payment_challenges) ? acceptance.payment_challenges : [];
+const challengeTools = paymentChallenges.map((entry) => entry?.tool).sort();
+const challengesValid = paymentChallenges.length === expectedTools.length &&
+  new Set(challengeTools).size === expectedTools.length &&
+  JSON.stringify(challengeTools) === JSON.stringify(expectedTools) &&
+  paymentChallenges.every((entry) =>
+    entry?.resource === `mcp://tool/${entry.tool}` &&
+    entry?.network === expectedNetwork &&
+    entry?.amount === expectedAmount &&
+    String(entry?.asset || "").toLowerCase() === expectedAsset &&
+    String(entry?.payTo || "").toLowerCase() === recipient &&
+    entry?.payment_identifier_required === true,
+  );
+const bazaarMcpTools = Array.isArray(acceptance.bazaar_mcp?.matched_tools)
+  ? [...acceptance.bazaar_mcp.matched_tools].sort()
+  : [];
+const bazaarRestTools = Array.isArray(acceptance.bazaar_rest?.matched_tools)
+  ? [...acceptance.bazaar_rest.matched_tools].sort()
+  : [];
 const validAcceptance =
+  acceptance.acceptance_endpoint === expectedAcceptanceEndpoint &&
   acceptance.free_call?.payment_status === "trial" &&
   acceptance.free_call?.payment_made === false &&
   acceptance.paid_call?.payment_status === "settled" &&
   acceptance.idempotent_retry?.payment_status === "cached_settlement" &&
   acceptance.idempotent_retry?.same_transaction === true &&
+  acceptance.replay_rejection?.code === "payment_replay" &&
+  acceptance.replay_rejection?.handler_not_reexecuted === true &&
+  challengesValid &&
   acceptance.unsuitable_task_rejected === true &&
   acceptance.bazaar_mcp?.ok === true &&
+  JSON.stringify(bazaarMcpTools) === JSON.stringify(expectedTools) &&
+  acceptance.bazaar_rest?.ok === true &&
+  JSON.stringify(bazaarRestTools) === JSON.stringify(expectedTools) &&
   acceptance.dashboard_revenue?.unchanged_by_testnet === true &&
   acceptance.dashboard_revenue?.before === acceptance.dashboard_revenue?.after &&
   JSON.stringify(acceptedTools) === JSON.stringify(expectedTools) &&
@@ -64,7 +106,7 @@ const validAcceptance =
   transactions.every((transaction) => typeof transaction === "string" && /^0x[0-9a-fA-F]{64}$/.test(transaction)) &&
   toolSettlements.every((entry) => entry?.payment_status === "settled");
 if (!validAcceptance) {
-  console.error("The acceptance report does not prove free use, all three testnet settlements, cached retry, Bazaar discovery, unsuitable-task rejection, and zero revenue impact.");
+  console.error("The acceptance report does not prove the trusted testnet endpoint, exact payment terms, free use, all three settlements, cached retry, replay rejection, Bazaar REST/MCP discovery, unsuitable-task rejection, and zero revenue impact.");
   process.exit(2);
 }
 const suiteHash = sha(suiteManifest);
@@ -77,10 +119,16 @@ const acceptanceEvidence = {
   recipient_hash: recipientHash,
   network: "eip155:84532",
   free_payment_status: acceptance.free_call.payment_status,
+  acceptance_endpoint: acceptance.acceptance_endpoint,
   tools: toolSettlements.map(({ tool, transaction }) => ({ tool, transaction })),
   idempotent_retry: true,
+  replay_rejected: true,
+  payment_challenges: paymentChallenges,
   unsuitable_task_rejected: true,
   bazaar_mcp_discovered: true,
+  bazaar_mcp_tools: bazaarMcpTools,
+  bazaar_rest_discovered: true,
+  bazaar_rest_tools: bazaarRestTools,
   dashboard_revenue_unchanged: true,
 };
 const attestation = {

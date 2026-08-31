@@ -12,11 +12,19 @@ afterEach(() => {
 
 function acceptance(overrides = {}) {
   return {
+    acceptance_endpoint: "https://upgradelens.mattpicone.workers.dev/mcp-testnet",
     free_call: { payment_made: false, payment_status: "trial" },
     paid_call: { payment_status: "settled" },
     idempotent_retry: { payment_status: "cached_settlement", same_transaction: true },
+    replay_rejection: { code: "payment_replay", handler_not_reexecuted: true },
+    payment_challenges: [
+      { tool: "check_dependency_upgrade", resource: "mcp://tool/check_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+      { tool: "find_safe_upgrade_target", resource: "mcp://tool/find_safe_upgrade_target", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+      { tool: "plan_dependency_upgrade", resource: "mcp://tool/plan_dependency_upgrade", network: "eip155:84532", asset: "0x036cbd53842c5426634e7929541ec2318f3dcf7e", amount: "10000", payTo: "0x1111111111111111111111111111111111111111", payment_identifier_required: true },
+    ],
     unsuitable_task_rejected: true,
-    bazaar_mcp: { ok: true },
+    bazaar_mcp: { ok: true, matched_tools: ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"] },
+    bazaar_rest: { ok: true, matched_tools: ["check_dependency_upgrade", "find_safe_upgrade_target", "plan_dependency_upgrade"] },
     dashboard_revenue: { before: 0, after: 0, unchanged_by_testnet: true },
     per_tool_testnet: [
       { tool: "check_dependency_upgrade", transaction: `0x${"1".repeat(64)}`, payment_status: "settled" },
@@ -39,6 +47,7 @@ function runAttestation(report) {
       ...process.env,
       TESTNET_ACCEPTANCE_FILE: reportPath,
       X402_PAY_TO: "0x1111111111111111111111111111111111111111",
+      ACCEPTANCE_SERVICE_URL: "https://upgradelens.mattpicone.workers.dev/mcp",
     },
   });
 }

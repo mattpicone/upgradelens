@@ -21,7 +21,7 @@ or failed.
 ## v0.3 release readiness (2026-08-31)
 
 - Typecheck, typed-contract drift checks, the Cloudflare dry-run bundle, the
-  three-pass selection gate, and all 169 tests pass (one credentialed live test
+  three-pass selection gate, and all 174 tests pass (one credentialed live test
   is intentionally skipped unless facilitator credentials are supplied).
 - The complete migration chain and idempotent v0.3 migration pass against a
   fresh SQLite database, including atomic trial delivery and stored fee data.
@@ -67,7 +67,7 @@ business demand.
 ## Local engineering (cutover session)
 
 - `npm run typecheck` passed.
-- `npm test` passed (169 tests, one credentialed live test skipped).
+- `npm test` passed (174 tests, one credentialed live test skipped).
 - Three-pass MCP selection scorer passed: 30/30 labels and sequences per pass.
 - Production probes passed: `/healthz` version 0.3.1 with `db=ok` and
   `telemetry_schema=ok`; Cursor-origin POST 200 with CORS; OPTIONS 204; unknown

@@ -44,6 +44,7 @@ const CORS_ALLOWED_HEADERS = [
   "mcp-protocol-version",
   "mcp-session-id",
   "last-event-id",
+  "x-upgradelens-testnet-run",
 ].join(", ");
 
 const PUBLIC_MCP_ORIGIN_SCHEMES = new Set([

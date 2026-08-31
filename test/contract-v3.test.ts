@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { CONTRACT_VERSION, MCP_TOOLS, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
+import { CONTRACT_VERSION, MCP_TOOLS, OPERATION_CATALOG, openApiDocument, paymentMode, pricingDocument, registryMetadata } from "../src/contract";
 import { fakeEnv } from "./helpers";
 import { deriveTrialSubject } from "../src/telemetry";
 import { paymentActivation } from "../src/payment";
@@ -59,6 +59,14 @@ describe("v0.3 machine contract", () => {
       extensions: { "payment-identifier": { info: { required: true } } },
     }).valid).toBe(true);
     expect(validate({ unrelated: true }).valid).toBe(false);
+  });
+
+  it("keeps every Bazaar output example valid against its advertised schema", () => {
+    const validator = new AjvJsonSchemaValidator();
+    for (const operation of OPERATION_CATALOG) {
+      const result = validator.getValidator(operation.outputSchema as never)(operation.outputExample);
+      expect(result.valid, `${operation.name} outputExample: ${result.valid ? "" : result.errorMessage}`).toBe(true);
+    }
   });
 
   it("publishes exact unit pricing and capability-first registry metadata", () => {
@@ -139,5 +147,32 @@ describe("v0.3 machine contract", () => {
       expect(outcome.result.next_action).toBe("apply_upgrade");
       expect(outcome.result.billing).toMatchObject({ mode: "validation", units: 1, payment_status: "validation_free" });
     }
+  });
+
+  it("marks target discovery as non-authorizing", async () => {
+    const outcome = await executeAnalysis({
+      env: fakeEnv({ PAYMENT_MODE: "validation" }),
+      caller: { clientKey: "anon:target", internal: false, keyed: false, plan: "anon", dailyQuota: 1, authState: "none" },
+      requestId: "contract-target-test",
+      operation: "find_safe_upgrade_target",
+      args: { ecosystem: "npm", package: "express", current_version: "4.18.2" },
+      units: 1,
+      resource: "https://example.test/v1/upgrade/target",
+      execute: async () => ({
+        ecosystem: "npm",
+        package: "express",
+        current_version: "4.18.2",
+        latest_stable: "4.21.2",
+        candidates: [],
+        evidence: [],
+        coverage: {},
+        confidence: 1,
+        freshness: "2026-08-31T00:00:00.000Z",
+        analysis_version: "2",
+        action_allowed: false,
+      }),
+    });
+    expect(outcome.kind).toBe("success");
+    if (outcome.kind === "success") expect(outcome.result.action_allowed).toBe(false);
   });
 });

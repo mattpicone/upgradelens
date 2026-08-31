@@ -187,6 +187,8 @@ export interface TargetCandidate {
 }
 
 export interface FindTargetResult {
+  /** Candidate discovery never authorizes an edit; a follow-up check/plan is required. */
+  action_allowed: boolean;
   ecosystem: Ecosystem;
   package: string;
   current_version: string;
