@@ -1,6 +1,6 @@
 {
   "name": "upgradelens",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Evidence-backed npm and PyPI dependency upgrade risk analysis for coding agents.",
   "mcpServers": {
     "upgradelens": {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-08-31
+
+- Published a compatibility-preserving discovery metadata patch so brandless
+  Registry searches match dependency, upgrade, package, security,
+  compatibility, and migration tasks without exceeding the Registry's
+  100-character description limit.
+- No API, pricing, payment, or analysis behavior changed from 0.3.0.
+
 ## 0.3.0 — 2026-08-30
 
 Machine-only discovery, contract, and payment release.

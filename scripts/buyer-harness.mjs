@@ -32,7 +32,7 @@ async function query(term) {
 }
 
 async function queryBazaarMcp() {
-  const client = new Client({ name: "capability-bazaar-search", version: "0.3.0" }, { capabilities: {} });
+  const client = new Client({ name: "capability-bazaar-search", version: "0.3.1" }, { capabilities: {} });
   try {
     await client.connect(
       new StreamableHTTPClientTransport(new URL(bazaarMcpUrl), {
@@ -171,7 +171,7 @@ if (ranked.length === 0) {
   process.exitCode = 2;
 } else {
   const selected = ranked[0];
-  const client = new Client({ name: "unseeded-buyer-harness", version: "0.3.0" }, { capabilities: {} });
+  const client = new Client({ name: "unseeded-buyer-harness", version: "0.3.1" }, { capabilities: {} });
   let buyer = client;
   let paymentPayload = null;
   if (process.env.BUYER_PRIVATE_KEY) {

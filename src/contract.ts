@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 
-export const CONTRACT_VERSION = "0.3.0";
+export const CONTRACT_VERSION = "0.3.1";
 export const ANALYSIS_UNIT_PRICE_USD = 0.01;
 export const ANALYSIS_UNIT_PRICE_MICROS = 10_000;
 export const ANALYSIS_UNIT_ATOMIC_USDC = "10000";
@@ -291,7 +291,7 @@ export function registryMetadata(env: Env) {
     name: "io.github.mattpicone/upgradelens",
     title: "UpgradeLens",
     description:
-      "Read-only npm/PyPI upgrade decisions, target ranking, and migration plans with source citations.",
+      "npm/PyPI dependency upgrades: package security, compatibility, target ranking, and migration plans.",
     version: CONTRACT_VERSION,
     websiteUrl: env.PUBLIC_BASE_URL,
     repository: { url: "https://github.com/mattpicone/upgradelens", source: "github" },

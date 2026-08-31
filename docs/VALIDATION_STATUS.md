@@ -1,11 +1,10 @@
 # Business-validation status
 
-Updated 2026-08-30.
+Updated 2026-08-31.
 
-> Historical evidence: the entries below describe the last v0.2.2 deployment.
-> The repository now contains the v0.3.0 implementation, but it is not a
-> public deployment or Registry/Bazaar proof until the release workflow and
-> operator checks confirm it.
+> UpgradeLens v0.3 is deployed. The additive D1 migration, public Worker
+> health/OpenAPI/pricing checks, GitHub CI, and official Registry publication
+> all passed. Paid settlement and Bazaar indexing remain external gates.
 
 ## Current conclusion
 
@@ -19,18 +18,18 @@ returned semantic success count as business demand. Until those counters move �
 the 45-day kill/pivot window ends — do not classify the experiment as successful
 or failed.
 
-## v0.3 local readiness (2026-08-31)
+## v0.3 release readiness (2026-08-31)
 
 - Typecheck, typed-contract drift checks, the Cloudflare dry-run bundle, the
   three-pass selection gate, and all 168 tests pass.
 - The complete migration chain and idempotent v0.3 migration pass against a
   fresh SQLite database, including atomic trial delivery and stored fee data.
-- The public Registry still reports v0.2.2. v0.3.0 is therefore implemented
-  locally but is not claimed as deployed or published.
-- Next honest gate: deploy the Worker and additive migration, verify public
-  health/OpenAPI/pricing, publish the immutable Registry record, then run the
-  credentialed `/mcp-testnet` acceptance and Bazaar proof. Mainnet remains
-  blocked.
+- The public Worker and official Registry both passed exact v0.3 verification.
+  v0.3.1 is a metadata-only patch that improves brandless capability ranking;
+  the API, price, payment state machine, and revenue rules are unchanged.
+- Next honest gate: run the credentialed `/mcp-testnet` acceptance and Bazaar
+  proof. Mainnet remains blocked until that proof and a recoverable recipient
+  are present.
 
 ## Live production
 
@@ -39,11 +38,11 @@ or failed.
 - `counts_reset_at`: `2026-08-29T19:57:23.228Z` — do not reset again
 - Owner-tagged MCP traffic is classified `internal` and does not increment
   business counters
-- Worker version 0.2.2 is deployed. Browser/Electron Origins now work, CORS
+- Worker version 0.3.0 is deployed; the v0.3.1 metadata patch is queued. Browser/Electron Origins work, CORS
   preflight returns 204, legacy 2025 clients remain supported, and current
   stateless 2026-07-28 discovery/tool envelopes are implemented
-- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.2.2 is
-  published and active; the live UI card and API record were verified
+- Official MCP Registry listing `io.github.mattpicone/upgradelens` v0.3.0 is
+  published and active; the public API record and OIDC workflow were verified
 - PulseMCP returns 0 servers. Glama's servers page is absent; connector listing:
   https://glama.ai/mcp/connectors/io.github.mattpicone/upgradelens. Cursor,
   Gemini gallery, Claude directory, Smithery, and general search have no live

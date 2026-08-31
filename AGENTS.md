@@ -1,7 +1,7 @@
 # UpgradeLens v0.3 operating charter
 
 UpgradeLens is a machine-only, read-only dependency-upgrade intelligence
-service for npm and PyPI. Its immutable machine contract is **0.3.0**. The
+service for npm and PyPI. Its immutable machine contract is **0.3.1**. The
 service never executes caller commands, clones repositories, follows
 caller-supplied URLs, or edits a caller's dependency files.
 

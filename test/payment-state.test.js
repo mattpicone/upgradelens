@@ -363,7 +363,7 @@ describe("paid authorization validation", () => {
       "lock-hash",
       "suite-hash",
       `0x${"1".repeat(64)}`,
-      "0.3.0",
+      "0.3.1",
       10000,
       NETWORK,
       recipientHash,

@@ -7,7 +7,7 @@ import { executeAnalysis } from "../src/payment";
 
 describe("v0.3 machine contract", () => {
   it("keeps one canonical capability catalog for MCP and OpenAPI", () => {
-    expect(CONTRACT_VERSION).toBe("0.3.0");
+    expect(CONTRACT_VERSION).toBe("0.3.1");
     expect(MCP_TOOLS.map((tool) => tool.name)).toEqual([
       "check_dependency_upgrade",
       "find_safe_upgrade_target",
@@ -35,6 +35,10 @@ describe("v0.3 machine contract", () => {
     });
     expect(registryMetadata(env).version).toBe(CONTRACT_VERSION);
     expect(registryMetadata(env)._meta.operations).toHaveLength(3);
+    expect(registryMetadata(env).description.length).toBeLessThanOrEqual(100);
+    for (const term of ["dependency", "upgrade", "package", "security", "compatibility", "migration"]) {
+      expect(registryMetadata(env).description.toLowerCase()).toContain(term);
+    }
   });
 
   it("derives a stable HMAC trial subject without storing a raw network address", async () => {

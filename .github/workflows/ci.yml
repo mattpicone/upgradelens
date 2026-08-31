@@ -79,7 +79,7 @@ jobs:
           curl -fsS "$SERVICE_URL/openapi.json" | node -e '
             let raw=""; process.stdin.on("data", d => raw += d).on("end", () => {
               const doc = JSON.parse(raw);
-              if (doc.info?.version !== "0.3.0" || !doc.paths?.["/v1/upgrade/check"] || !doc.paths?.["/v1/upgrade/target"] || !doc.paths?.["/v1/upgrade/plan"]) process.exit(1);
+              if (doc.info?.version !== "0.3.1" || !doc.paths?.["/v1/upgrade/check"] || !doc.paths?.["/v1/upgrade/target"] || !doc.paths?.["/v1/upgrade/plan"]) process.exit(1);
             });
           '
       - name: Reassert dashboard zero-count baseline after health check

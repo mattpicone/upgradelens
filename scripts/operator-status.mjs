@@ -44,7 +44,7 @@ const versions = {
   contract: contractSource.match(/CONTRACT_VERSION\s*=\s*"([^"]+)"/)?.[1] || null,
   wrangler: wrangler.match(/SERVICE_VERSION\s*=\s*"([^"]+)"/)?.[1] || null,
 };
-const versionConsistent = Object.values(versions).every((v) => v === versions.package && v === "0.3.0");
+const versionConsistent = Object.values(versions).every((v) => v === versions.package && v === "0.3.1");
 const git = command("git", ["status", "--short"]);
 const tests = command("npm", ["test"]);
 const health = await fetchJson(`${base}/healthz`);
@@ -55,7 +55,7 @@ const registry = await fetchJson(registryUrl);
 const registryText = JSON.stringify(registry.body || {}).toLowerCase();
 const registryIndexed = registry.ok &&
   registryText.includes("io.github.mattpicone/upgradelens") &&
-  /\"version\"\s*:\s*\"0\.3\.0\"/.test(registryText);
+  /\"version\"\s*:\s*\"0\.3\.1\"/.test(registryText);
 const bazaar = process.env.BAZAAR_STATUS_URL
   ? await fetchJson(process.env.BAZAAR_STATUS_URL)
   : process.env.BAZAAR_STATE
@@ -66,14 +66,14 @@ const activation = pricing.body?.payment_activation || null;
 const checks = {
   contract_version: { ok: versionConsistent, detail: versions },
   tests: { ok: tests.ok, detail: tests.ok ? "passed" : tests.output.slice(-1200) },
-  public_health: { ok: health.ok && health.body?.service === "upgradelens" && health.body?.version === "0.3.0", detail: health.status },
-  openapi: { ok: openapi.ok && openapi.body?.info?.version === "0.3.0", detail: openapi.status },
-  pricing: { ok: pricing.ok && pricing.body?.version === "0.3.0" && pricing.body?.unit?.price_usd === 0.01 && pricing.body?.unit?.atomic_usdc === "10000", detail: pricing.status },
+  public_health: { ok: health.ok && health.body?.service === "upgradelens" && health.body?.version === "0.3.1", detail: health.status },
+  openapi: { ok: openapi.ok && openapi.body?.info?.version === "0.3.1", detail: openapi.status },
+  pricing: { ok: pricing.ok && pricing.body?.version === "0.3.1" && pricing.body?.unit?.price_usd === 0.01 && pricing.body?.unit?.atomic_usdc === "10000", detail: pricing.status },
   registry: { ok: registryIndexed, detail: registryIndexed ? "indexed" : registry.error || registry.status },
   bazaar: { ok: bazaar.ok, detail: bazaar.ok ? "reachable" : bazaar.error || bazaar.status },
   payment_activation: { ok: activation?.ready === true || activation?.mode === "validation", detail: activation },
 };
-const next = !checks.contract_version.ok ? "align immutable 0.3.0 manifests"
+const next = !checks.contract_version.ok ? "align immutable 0.3.1 manifests"
   : !checks.tests.ok ? "fix the local test suite"
   : !checks.public_health.ok ? "deploy and verify /healthz"
   : !checks.registry.ok ? "publish/verify the immutable MCP Registry version"

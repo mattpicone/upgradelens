@@ -5,7 +5,7 @@
 import { readFile } from "node:fs/promises";
 
 const root = new URL("..", import.meta.url);
-const expected = "0.3.0";
+const expected = "0.3.1";
 const typedContract = await import(new URL("src/contract.ts", root));
 const json = async (name) => JSON.parse(await readFile(new URL(name, root), "utf8"));
 const text = async (name) => readFile(new URL(name, root), "utf8");

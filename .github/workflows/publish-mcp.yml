@@ -17,7 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Verify immutable v0.3.0 contract before publishing
+      - name: Verify immutable v0.3.1 contract before publishing
         run: npm run contract:check
       - name: Install mcp-publisher
         run: |
@@ -36,12 +36,12 @@ jobs:
               let found = false;
               const visit = value => {
                 if (!value || typeof value !== "object") return;
-                if (value.name === "io.github.mattpicone/upgradelens" && value.version === "0.3.0") found = true;
+                if (value.name === "io.github.mattpicone/upgradelens" && value.version === "0.3.1") found = true;
                 for (const child of Object.values(value)) visit(child);
               };
               visit(body);
               if (!found) {
-                console.error("Exact v0.3.0 Registry record was not returned after publish.");
+                console.error("Exact v0.3.1 Registry record was not returned after publish.");
                 process.exit(1);
               }
             });
